@@ -1,0 +1,26 @@
+# backend/docker-compose.yml
+# Add redis service
+redis:
+  image: redis:7-alpine
+  container_name: uc1-redis
+  ports:
+    - "6379:6379"
+  volumes:
+    - redis_data:/data
+  networks:
+    - uc1-network
+
+# Add kokoro service
+kokoro:
+  image: unicorncommander/kokoro-tts:latest
+  container_name: uc1-kokoro
+  ports:
+    - "8880:8880"
+  networks:
+    - uc1-network
+
+# Add volumes at bottom
+volumes:
+  ollama_data:
+  postgres_data:
+  redis_data:
