@@ -32,10 +32,11 @@ class AIResponseThread(QThread):
 class AIChatWidget(QWidget):
     """AI Chat Widget for real estate assistant"""
     
-    def __init__(self, parent=None):
+    def __init__(self, colonel_client=None, parent=None):
         super().__init__(parent)
-        self.colonel_client = ColonelClient()
+        self.colonel_client = colonel_client or ColonelClient()
         self.current_thread = None
+        self.current_settings = {}
         self.init_ui()
         
     def init_ui(self):
@@ -191,3 +192,51 @@ class AIChatWidget(QWidget):
             commands_layout.addWidget(btn)
             
         return commands_layout
+    
+    def update_settings(self, new_settings):
+        """Update widget with new settings"""
+        self.current_settings = new_settings
+        
+        # Update status based on new settings
+        if hasattr(self.colonel_client, 'get_backend_status'):
+            status = self.colonel_client.get_backend_status()
+            agent_count = status.get('available_agents', 0)
+            total_agents = status.get('total_agents', 4)
+            backend_type = status.get('backend_type', 'Unknown')
+            
+            if status.get('backend_ready', False):
+                self.status_label.setText(f"✅ {agent_count}/{total_agents} agents ready ({backend_type})")
+                self.status_label.setStyleSheet("color: green; font-size: 11px;")
+            else:
+                self.status_label.setText(f"⚠️ {backend_type} not configured")
+                self.status_label.setStyleSheet("color: orange; font-size: 11px;")
+        else:
+            # Legacy status
+            try:
+                ok = self.colonel_client.ping()
+                if ok:
+                    self.status_label.setText(f"✅ {len(self.colonel_client.available_agents)}/4 agents ready")
+                    self.status_label.setStyleSheet("color: green; font-size: 11px;")
+                else:
+                    self.status_label.setText("⚠️ AI backend disconnected")
+                    self.status_label.setStyleSheet("color: orange; font-size: 11px;")
+            except:
+                self.status_label.setText("❌ AI backend error")
+                self.status_label.setStyleSheet("color: red; font-size: 11px;")
+        
+        # Update agent combo box if available agents changed
+        if hasattr(self.colonel_client, 'available_agents'):
+            self.agent_combo.clear()
+            available_agents = list(self.colonel_client.available_agents.keys())
+            
+            for agent_key in available_agents:
+                if hasattr(self.colonel_client, 'agent_profiles') and agent_key in self.colonel_client.agent_profiles:
+                    agent_name = self.colonel_client.agent_profiles[agent_key]['name']
+                else:
+                    agent_name = agent_key.replace('_', ' ').title()
+                self.agent_combo.addItem(f"{agent_name}", agent_key)
+        
+        # Add system message about settings update
+        backend_type = new_settings.get('ai_backend', {}).get('backend_type', 'Unknown')
+        mls_provider = new_settings.get('mls_providers', {}).get('preferred_provider', 'Unknown')
+        self.add_system_message(f"Settings updated: {backend_type.title()} AI + {mls_provider.title()} MLS")

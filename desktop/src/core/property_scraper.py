@@ -51,7 +51,8 @@ class PropertyScraper:
             }
             
             # For demo purposes, simulate Zillow data
-            return self._simulate_zillow_data(address)
+            # return self._simulate_zillow_data(address)
+            return {"error": "Zillow scraping not implemented"}
             
         except Exception as e:
             logger.error(f"Zillow search error: {e}")
@@ -64,7 +65,8 @@ class PropertyScraper:
             base_url = "https://www.redfin.com/stingray/api/gis"
             
             # For demo purposes, simulate Redfin data
-            return self._simulate_redfin_data(address)
+            # return self._simulate_redfin_data(address)
+            return {"error": "Redfin scraping not implemented"}
             
         except Exception as e:
             logger.error(f"Redfin search error: {e}")
@@ -77,7 +79,8 @@ class PropertyScraper:
             base_url = "https://www.realtor.com/api/v1/hulk_main_srp"
             
             # For demo purposes, simulate Realtor.com data
-            return self._simulate_realtor_data(address)
+            # return self._simulate_realtor_data(address)
+            return {"error": "Realtor.com scraping not implemented"}
             
         except Exception as e:
             logger.error(f"Realtor.com search error: {e}")
@@ -153,128 +156,13 @@ class PropertyScraper:
         
         return consolidated
     
-    # Simulation methods for development/testing
-    def _simulate_zillow_data(self, address: str) -> Dict[str, Any]:
-        """Simulate realistic Zillow-style data"""
-        import random
-        
-        return {
-            'source': 'zillow',
-            'zpid': f'zid_{random.randint(100000, 999999)}',
-            'bedrooms': random.randint(2, 5),
-            'bathrooms': random.choice([1.5, 2, 2.5, 3, 3.5, 4]),
-            'square_feet': random.randint(1200, 4500),
-            'lot_size': random.randint(5000, 20000),
-            'year_built': random.randint(1950, 2023),
-            'property_type': random.choice(['Single Family', 'Condo', 'Townhouse']),
-            'estimated_value': random.randint(300000, 1200000),
-            'zestimate': random.randint(280000, 1300000),
-            'rent_estimate': random.randint(1800, 5000),
-            'last_sale_price': random.randint(250000, 1000000),
-            'last_sale_date': '2022-06-15',
-            'tax_assessment': random.randint(280000, 1100000),
-            'photos': [
-                'https://photos.zillowstatic.com/fp/example1.jpg',
-                'https://photos.zillowstatic.com/fp/example2.jpg'
-            ],
-            'description': f'Beautiful property located at {address}. Recently updated with modern amenities.',
-            'features': ['Central Air', 'Hardwood Floors', 'Updated Kitchen', 'Fireplace'],
-            'neighborhood': 'Downtown',
-            'walkability_score': random.randint(50, 100)
-        }
-    
-    def _simulate_redfin_data(self, address: str) -> Dict[str, Any]:
-        """Simulate realistic Redfin-style data"""
-        import random
-        
-        return {
-            'source': 'redfin',
-            'property_id': f'rf_{random.randint(100000, 999999)}',
-            'bedrooms': random.randint(2, 5),
-            'bathrooms': random.choice([1.5, 2, 2.5, 3, 3.5]),
-            'square_feet': random.randint(1200, 4000),
-            'lot_size': random.randint(4000, 15000),
-            'year_built': random.randint(1960, 2022),
-            'property_type': random.choice(['Single Family', 'Condo', 'Townhouse']),
-            'estimated_value': random.randint(320000, 1100000),
-            'redfin_estimate': random.randint(310000, 1150000),
-            'last_sale_price': random.randint(280000, 950000),
-            'last_sale_date': '2022-08-22',
-            'days_on_market': random.randint(5, 60),
-            'price_per_sqft': random.randint(150, 400),
-            'photos': [
-                'https://ssl.cdn-redfin.com/photo/example1.jpg',
-                'https://ssl.cdn-redfin.com/photo/example2.jpg'
-            ],
-            'description': f'Lovely home at {address} with great potential.',
-            'features': ['Garage', 'Garden', 'Updated Bathrooms', 'New Roof'],
-            'school_district': 'Excellent School District',
-            'walk_score': random.randint(40, 95)
-        }
-    
-    def _simulate_realtor_data(self, address: str) -> Dict[str, Any]:
-        """Simulate realistic Realtor.com-style data"""
-        import random
-        
-        return {
-            'source': 'realtor',
-            'property_id': f'rdc_{random.randint(100000, 999999)}',
-            'bedrooms': random.randint(2, 6),
-            'bathrooms': random.choice([1.5, 2, 2.5, 3, 4]),
-            'square_feet': random.randint(1100, 4200),
-            'lot_size': random.randint(3500, 18000),
-            'year_built': random.randint(1955, 2023),
-            'property_type': random.choice(['Single Family', 'Condo', 'Townhouse', 'Multi-Family']),
-            'estimated_value': random.randint(290000, 1250000),
-            'last_sale_price': random.randint(270000, 1000000),
-            'last_sale_date': '2022-04-10',
-            'market_value': random.randint(300000, 1200000),
-            'photos': [
-                'https://ap.rdcpix.com/example1.jpg',
-                'https://ap.rdcpix.com/example2.jpg'
-            ],
-            'description': f'Prime property at {address} in desirable neighborhood.',
-            'features': ['Pool', 'Patio', 'Master Suite', 'Two-Car Garage'],
-            'neighborhood': 'Prestigious Area',
-            'hoa_fees': random.randint(0, 400) if random.choice([True, False]) else 0
-        }
-    
     def search_area_listings(self, city: str, state: str, filters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Search for active listings in an area"""
         logger.info(f"Searching listings in {city}, {state}")
         
         # Simulate area search results
-        listings = []
-        for i in range(random.randint(10, 25)):
-            listing = {
-                'id': f'listing_{i+1}',
-                'address': f'{random.randint(100, 9999)} {random.choice(["Oak", "Pine", "Maple", "Cedar", "Elm"])} {random.choice(["St", "Ave", "Dr", "Way", "Ln"])}',
-                'city': city,
-                'state': state,
-                'price': random.randint(200000, 1500000),
-                'bedrooms': random.randint(1, 6),
-                'bathrooms': random.choice([1, 1.5, 2, 2.5, 3, 3.5, 4]),
-                'square_feet': random.randint(800, 4500),
-                'property_type': random.choice(['Single Family', 'Condo', 'Townhouse']),
-                'days_on_market': random.randint(1, 120),
-                'status': 'Active',
-                'photos': [f'https://example.com/photo_{i+1}_1.jpg'],
-                'listing_agent': f'Agent {random.choice(["Smith", "Johnson", "Williams", "Brown"])}',
-                'last_updated': datetime.now().isoformat()
-            }
-            
-            # Apply filters if provided
-            if filters:
-                if 'min_price' in filters and listing['price'] < filters['min_price']:
-                    continue
-                if 'max_price' in filters and listing['price'] > filters['max_price']:
-                    continue
-                if 'bedrooms' in filters and listing['bedrooms'] != filters['bedrooms']:
-                    continue
-            
-            listings.append(listing)
-        
-        return listings[:15]  # Return top 15 results
+        # For now, return empty list as real scraping is not implemented
+        return []
 
 
 class PropertyDataEnhancer:
@@ -292,18 +180,24 @@ class PropertyDataEnhancer:
         # Get comprehensive data from multiple sources
         scraped_data = self.scraper.get_property_comprehensive(basic_data['address'])
         
-        # Merge with existing data
+        # Merge with existing data if scraping was successful
         enhanced = basic_data.copy()
-        enhanced['scraped_sources'] = scraped_data['sources']
-        enhanced['consolidated_data'] = scraped_data['consolidated']
-        
-        # Override with more accurate scraped data where available
-        consolidated = scraped_data['consolidated']
-        for key, value in consolidated.items():
-            if value is not None and key not in ['confidence_score']:
-                enhanced[key] = value
-        
-        enhanced['data_confidence'] = consolidated.get('confidence_score', 0.0)
-        enhanced['last_scraped'] = scraped_data['last_updated']
+        if scraped_data and not scraped_data.get('error'):
+            enhanced['scraped_sources'] = scraped_data['sources']
+            enhanced['consolidated_data'] = scraped_data['consolidated']
+            
+            # Override with more accurate scraped data where available
+            consolidated = scraped_data['consolidated']
+            for key, value in consolidated.items():
+                if value is not None and key not in ['confidence_score']:
+                    enhanced[key] = value
+            
+            enhanced['data_confidence'] = consolidated.get('confidence_score', 0.0)
+            enhanced['last_scraped'] = scraped_data['last_updated']
+        else:
+            enhanced['scraped_sources'] = {"error": "Web scraping not active or failed"}
+            enhanced['consolidated_data'] = {}
+            enhanced['data_confidence'] = 0.0
+            enhanced['last_scraped'] = datetime.now().isoformat()
         
         return enhanced

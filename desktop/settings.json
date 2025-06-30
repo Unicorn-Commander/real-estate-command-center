@@ -1,4 +1,4 @@
 {
-  "api_url": "http://localhost:8264",
-  "theme": "dark_amber.xml"
+  "api_endpoint": "http://localhost:11434",
+  "theme": "modern"
 }

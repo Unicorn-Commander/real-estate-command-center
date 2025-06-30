@@ -9,16 +9,20 @@ import re
 from typing import Dict, List, Any, Optional
 from core.property_service import PropertyService
 from core.lead_generator import LeadGenerator
+import openai
 
 class ColonelClient:
     def __init__(self, url: str = None):
         self.url = url or "http://localhost:11434"
         self.ollama_url = "http://localhost:11434"
-        
+        self.use_openai = os.getenv("USE_OPENAI", "False").lower() == "true"
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.openai_client = None
+
         # Initialize real data services
         self.property_service = PropertyService()
         self.lead_generator = LeadGenerator()
-        
+
         # Initialize with sample realistic leads
         self._leads = self.lead_generator.generate_sample_leads(20)
         self._campaigns = [
@@ -26,11 +30,12 @@ class ColonelClient:
             {'id': 2, 'name': 'Holiday Promo', 'status': 'Planned', 'start_date': '2024-11-15'},
             {'id': 3, 'name': 'Referral Drive', 'status': 'Completed', 'start_date': '2024-03-20'},
         ]
-        
-        # Specialized Agent Profiles with Ollama models
+
+        # Specialized Agent Profiles with models
         self.agent_profiles = {
             'property_analyst': {
-                'model': 'qwen2.5:14b',
+                'ollama_model': 'qwen2.5vl:q4_k_m',
+                'openai_model': 'gpt-4o',
                 'system_message': """You are a specialized Property Analysis Agent for real estate professionals.
 Your expertise includes:
 - Property valuation and assessment
@@ -43,7 +48,8 @@ Always provide data-driven insights with specific recommendations.""",
                 'name': 'Property Analyst'
             },
             'market_researcher': {
-                'model': 'deepseek-r1:7b',
+                'ollama_model': 'qwen3:q4_k_m',
+                'openai_model': 'gpt-4o',
                 'system_message': """You are a Market Research Specialist for real estate.
 Your expertise includes:
 - Local market trends and statistics
@@ -56,7 +62,8 @@ Focus on actionable market intelligence and trends.""",
                 'name': 'Market Researcher'
             },
             'lead_manager': {
-                'model': 'llama3.2:3b',
+                'ollama_model': 'gemma3:4b-q4_k_m',
+                'openai_model': 'gpt-3.5-turbo',
                 'system_message': """You are a Lead Management Specialist for real estate agents.
 Your expertise includes:
 - Lead qualification and scoring
@@ -69,7 +76,8 @@ Provide practical lead nurturing strategies.""",
                 'name': 'Lead Manager'
             },
             'marketing_expert': {
-                'model': 'llama3.2:3b',
+                'ollama_model': 'gemma3:4b-q4_k_m',
+                'openai_model': 'gpt-3.5-turbo',
                 'system_message': """You are a Real Estate Marketing Expert.
 Your expertise includes:
 - Property listing optimization
@@ -82,43 +90,70 @@ Create compelling marketing strategies that convert.""",
                 'name': 'Marketing Expert'
             }
         }
-        
+
         # Initialize The Colonel interpreter
         self._init_colonel()
-    
+
     def _init_colonel(self):
-        """Initialize Ollama connection"""
-        try:
-            # Test Ollama connection
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                available_models = [model['name'] for model in models]
+        """Initialize AI connection (Ollama or OpenAI)"""
+        self.available_agents = {}
+        if self.use_openai:
+            if not self.openai_api_key:
+                print("⚠️ OPENAI_API_KEY environment variable not set. OpenAI integration disabled.")
+                self.colonel_mode = None
+                return
+
+            try:
+                self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
+                # Test OpenAI connection by listing models (or a simpler call)
+                self.openai_client.models.list() # This will raise an exception if API key is invalid
                 
-                # Check which agent models are available
-                self.available_agents = {}
                 for agent_type, config in self.agent_profiles.items():
-                    model_name = config['model']
-                    if model_name in available_models:
-                        self.available_agents[agent_type] = config
-                        print(f"✅ {config['name']} ready with {model_name}")
-                    else:
-                        print(f"⚠️ {config['name']} model {model_name} not available")
-                
-                self.colonel_mode = "ollama"
-                print(f"✅ The Colonel Ollama integration ready ({len(self.available_agents)}/4 agents)")
-            else:
-                raise Exception(f"Ollama not responding: {response.status_code}")
-                
-        except Exception as e:
-            print(f"⚠️ Could not connect to Ollama: {e}")
-            self.colonel_mode = None
-            self.available_agents = {}
+                    self.available_agents[agent_type] = {
+                        'model': config['openai_model'],
+                        'system_message': config['system_message'],
+                        'name': config['name']
+                    }
+                    print(f"✅ {config['name']} ready with OpenAI model {config['openai_model']}")
+                self.colonel_mode = "openai"
+                print(f"✅ The Colonel OpenAI integration ready ({len(self.available_agents)}/4 agents)")
+            except Exception as e:
+                print(f"⚠️ Could not connect to OpenAI or invalid API key: {e}")
+                self.colonel_mode = None
+        else:
+            try:
+                # Test Ollama connection
+                response = requests.get(f"{self.ollama_url}/api/tags", timeout=5)
+                if response.status_code == 200:
+                    models = response.json().get('models', [])
+                    available_ollama_models = [model['name'] for model in models]
+
+                    # Check which agent models are available
+                    for agent_type, config in self.agent_profiles.items():
+                        model_name = config['ollama_model']
+                        if model_name in available_ollama_models:
+                            self.available_agents[agent_type] = {
+                                'model': config['ollama_model'],
+                                'system_message': config['system_message'],
+                                'name': config['name']
+                            }
+                            print(f"✅ {config['name']} ready with Ollama model {model_name}")
+                        else:
+                            print(f"⚠️ {config['name']} Ollama model {model_name} not available")
+
+                    self.colonel_mode = "ollama"
+                    print(f"✅ The Colonel Ollama integration ready ({len(self.available_agents)}/4 agents)")
+                else:
+                    raise Exception(f"Ollama not responding: {response.status_code}")
+
+            except Exception as e:
+                print(f"⚠️ Could not connect to Ollama: {e}")
+                self.colonel_mode = None
         
         self.colonel = self  # Use self for interface
-        
+
     def chat_with_agent(self, message: str, agent_type: str = 'property_analyst', stream: bool = False) -> str:
-        """Send a message to a specialized agent using Ollama"""
+        """Send a message to a specialized agent using the configured AI backend"""
         if agent_type not in self.available_agents:
             available = list(self.available_agents.keys())
             return f"Agent {agent_type} not available. Available agents: {available}"
@@ -127,8 +162,44 @@ Create compelling marketing strategies that convert.""",
         enhanced_message = self._enhance_message_with_property_data(message)
         
         agent_config = self.available_agents[agent_type]
-        return self._chat_with_ollama(enhanced_message, agent_config['model'], agent_config['system_message'], agent_config['name'], stream)
+        
+        if self.colonel_mode == "ollama":
+            return self._chat_with_ollama(enhanced_message, agent_config['model'], agent_config['system_message'], agent_config['name'], stream)
+        elif self.colonel_mode == "openai":
+            return self._chat_with_openai(enhanced_message, agent_config['model'], agent_config['system_message'], agent_config['name'], stream)
+        else:
+            return "The Colonel is not configured. Please check AI settings."
     
+    def _chat_with_openai(self, message: str, model: str, system_message: str, agent_name: str, stream: bool = False) -> str:
+        """Chat with OpenAI API directly"""
+        try:
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": message}
+            ]
+            
+            if stream:
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=True
+                )
+                full_response = ""
+                for chunk in response:
+                    if chunk.choices[0].delta.content is not None:
+                        full_response += chunk.choices[0].delta.content
+                return f"[{agent_name}]: {full_response.strip()}"
+            else:
+                response = self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=False
+                )
+                content = response.choices[0].message.content.strip()
+                return f"[{agent_name}]: {content}"
+        except Exception as e:
+            return f"[{agent_name}]: Error - {str(e)[:100]}"
+
     def _chat_with_ollama(self, message: str, model: str, system_message: str, agent_name: str, stream: bool = False) -> str:
         """Chat with Ollama API directly"""
         try:
@@ -240,7 +311,7 @@ COMPARABLE SALES:
     def chat(self, message: str, model: str = None) -> str:
         """Send a message to The Colonel using default or specified agent"""
         if not self.colonel_mode:
-            return "The Colonel is not available. Using demo mode."
+            return "The Colonel is not available. Please check AI settings."
         
         # Use property_analyst as default agent
         if 'property_analyst' in self.available_agents:
@@ -250,7 +321,7 @@ COMPARABLE SALES:
             first_agent = list(self.available_agents.keys())[0]
             return self.chat_with_agent(message, first_agent)
         else:
-            return "No agents are currently available. Please check Ollama models."
+            return "No agents are currently available. Please check AI settings."
     
     def analyze_property(self, property_data: Dict[str, Any]) -> Dict[str, Any]:
         """Use The Colonel to analyze property data"""

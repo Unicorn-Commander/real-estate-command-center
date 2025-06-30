@@ -22,10 +22,10 @@
 
 ### **2. AI Integration System - BREAKTHROUGH ACHIEVEMENT**
 - ✅ **4 Specialized Real Estate AI Agents**:
-  - **Property Analyst** (Qwen2.5:14b) - Property valuation, CMA analysis
-  - **Market Researcher** (DeepSeek-R1:7b) - Market trends, forecasting
-  - **Lead Manager** (Llama3.2:3b) - Lead qualification, nurturing strategies
-  - **Marketing Expert** (Llama3.2:3b) - Listing optimization, campaigns
+  - **Property Analyst** (qwen2.5vl:q4_k_m) - Property valuation, CMA analysis, visual insights
+  - **Market Researcher** (qwen3:q4_k_m) - Market trends, forecasting, advanced research
+  - **Lead Manager** (gemma3:4b-q4_k_m) - Lead qualification, nurturing strategies, communication
+  - **Marketing Expert** (gemma3:4b-q4_k_m) - Listing optimization, campaigns, content generation
 
 - ✅ **Advanced AI Features**:
   - **Smart Address Detection**: AI automatically recognizes addresses in conversations
@@ -123,9 +123,9 @@
 ```
 
 ### **AI Model Configuration**
-- **Qwen2.5:14b** - Advanced property analysis, market insights
-- **DeepSeek-R1:7b** - Market research, trend analysis, forecasting
-- **Llama3.2:3b** - Lead management, marketing strategies, communication
+- **qwen2.5vl:q4_k_m** - Advanced property analysis, visual insights, market insights
+- **qwen3:q4_k_m** - Market research, trend analysis, forecasting
+- **gemma3:4b-q4_k_m** - Lead management, marketing strategies, communication
 
 ### **Data Flow Architecture**
 1. **User Input** → AI Chat or GUI Forms
