@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16
+    container_name: real_estate_db
+    restart: always
+    environment:
+      POSTGRES_DB: realestate_db
+      POSTGRES_USER: realestate
+      POSTGRES_PASSWORD: commander123
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  db_data:

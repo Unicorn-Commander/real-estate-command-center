@@ -6,15 +6,25 @@ import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from core.property_scraper import PropertyScraper, PropertyDataEnhancer
-from core.mls_client import MLSClient
-from core.mls_client_enhanced import create_mls_client, MLSAggregator
+from core.mls_client_enhanced import create_mls_client, MLSAggregator, MLSClient
 from core.public_data_scraper import create_public_scraper, parse_address_components, identify_county_from_address
 
 
 class PropertyService:
     """Service for fetching real property data"""
     
-    def __init__(self, preferred_mls_provider: str = 'bridge', use_multiple_providers: bool = True):
+    def __init__(self, preferred_mls_provider: str = 'bridge', use_multiple_providers: bool = True, settings: dict = None):
+        self.settings = settings or {}
+        
+        # Multiple data sources for redundancy
+        self.data_sources = {
+            'geocoding': 'https://nominatim.openstreetmap.org/search',
+        }
+        
+        # Initialize enhanced MLS integration
+        self.mls_settings = self.settings.get('mls_providers', {})
+        self.preferred_mls_provider = self.mls_settings.get('preferred_provider', preferred_mls_provider)
+        self.use_multiple_providers = self.mls_settings.get('use_multiple_providers', use_multiple_providers)
         """Initialize PropertyService with enhanced MLS integration
         
         Args:
@@ -27,19 +37,23 @@ class PropertyService:
         }
         
         # Initialize enhanced MLS integration
-        self.preferred_mls_provider = preferred_mls_provider
-        
-        if use_multiple_providers:
+        # Initialize enhanced MLS integration
+        self.mls_settings = self.settings.get('mls_providers', {})
+        self.preferred_mls_provider = self.mls_settings.get('preferred_provider', preferred_mls_provider)
+        self.use_multiple_providers = self.mls_settings.get('use_multiple_providers', use_multiple_providers)
+
+        # Initialize MLS clients with settings
+        if self.use_multiple_providers:
             # Use MLS aggregator for multiple data sources
-            self.mls_aggregator = MLSAggregator(['bridge', 'estated'])
-            self.primary_mls_client = create_mls_client(preferred_mls_provider)
+            self.mls_aggregator = MLSAggregator(settings=self.settings)
+            self.primary_mls_client = create_mls_client(self.preferred_mls_provider, settings=self.settings)
         else:
             # Use single provider
             self.mls_aggregator = None
-            self.primary_mls_client = create_mls_client(preferred_mls_provider)
+            self.primary_mls_client = create_mls_client(self.preferred_mls_provider, settings=self.settings)
         
-        # Initialize legacy MLS client for backward compatibility
-        self.mls_client = MLSClient()
+        # Initialize legacy MLS client for backward compatibility (can be removed if not needed)
+        self.mls_client = MLSClient(provider=self.preferred_mls_provider) # Use preferred provider for legacy client
         
         # Initialize scraping components
         self.scraper = PropertyScraper()
@@ -126,11 +140,16 @@ class PropertyService:
                 except Exception as e:
                     print(f"⚠️ Public records lookup failed: {e}")
             
-            # Step 4: Fallback to simulated data if needed
+            # Step 4: Check if we have real data, otherwise return empty result
             if not property_data:
-                print("⚠️ No MLS results found, using simulated property details")
-                property_data = self._get_property_details_simulated(address, location_data)
-                data_sources_used.append('simulated')
+                print("⚠️ No MLS results found and no API key configured")
+                return {
+                    'error': 'No property data available - MLS API key required',
+                    'address': address,
+                    'location': location_data,
+                    'data_sources': data_sources_used,
+                    'confidence': 0.0
+                }
             
             # Step 5: Enhance with scraped data from multiple sources
             enhanced_data = self.enhancer.enhance_property_data({
@@ -157,12 +176,12 @@ class PropertyService:
                         data_sources_used.append('legacy_mls_comparables')
                         print("✅ Found comparable sales from legacy MLS")
                     else:
-                        comparables = self._get_comparable_sales_simulated(location_data)
-                        data_sources_used.append('simulated_comparables')
-                        print("⚠️ Using simulated comparable sales")
+                        comparables = []
+                        data_sources_used.append('no_comparables')
+                        print("⚠️ No comparable sales available - MLS API key required")
             else:
-                comparables = self._get_comparable_sales_simulated(location_data)
-                data_sources_used.append('simulated_comparables')
+                comparables = []
+                data_sources_used.append('no_comparables')
             
             # Step 7: Get market data (prioritize enhanced MLS)
             market_data = None
@@ -182,10 +201,10 @@ class PropertyService:
                     data_sources_used.append(f"{self.preferred_mls_provider}_market")
                     print(f"✅ Found market data from {self.preferred_mls_provider.title()}")
                 else:
-                    # Final fallback to simulated data
-                    market_data = self._get_market_data_simulated(location_data)
-                    data_sources_used.append('simulated_market')
-                    print("⚠️ Using simulated market data")
+                    # No market data available without API keys
+                    market_data = {}
+                    data_sources_used.append('no_market_data')
+                    print("⚠️ No market data available - MLS API key required")
             
             # Step 8: Assemble comprehensive result
             result = {
@@ -292,96 +311,6 @@ class PropertyService:
         except Exception as e:
             print(f"Geocoding error: {e}")
             return None
-    
-    def _get_property_details_simulated(self, address: str, location: Dict[str, Any]) -> Dict[str, Any]:
-        """Get detailed property information (currently using mock data)"""
-        
-        # TODO: Replace with real MLS/Zillow API
-        # For now, generate realistic mock data based on location
-        
-        import random
-        
-        # Extract city/state for realistic pricing
-        city = location['address_details'].get('city', 'Unknown')
-        state = location['address_details'].get('state', 'Unknown')
-        
-        # Basic property type determination
-        property_types = ['Single Family', 'Condo', 'Townhouse', 'Multi Family']
-        property_type = random.choice(property_types)
-        
-        # Realistic pricing based on mock city data
-        base_prices = {
-            'Portland': 650000, 'Seattle': 850000, 'San Francisco': 1500000,
-            'Austin': 450000, 'Denver': 550000, 'Miami': 400000
-        }
-        base_price = base_prices.get(city, 350000)
-        
-        # Generate realistic property details
-        bedrooms = random.randint(2, 5)
-        bathrooms = random.choice([1.5, 2, 2.5, 3, 3.5])
-        sqft = random.randint(1200, 4000)
-        
-        # Price based on size and location
-        price = int(base_price * (sqft / 2000) * random.uniform(0.8, 1.3))
-        
-        return {
-            'type': property_type,
-            'bedrooms': bedrooms,
-            'bathrooms': bathrooms,
-            'square_feet': sqft,
-            'lot_size': random.randint(5000, 15000),
-            'year_built': random.randint(1960, 2020),
-            'estimated_value': price,
-            'last_sale_price': int(price * random.uniform(0.7, 0.9)),
-            'last_sale_date': '2022-03-15',  # Mock date
-            'property_tax': int(price * 0.012),  # Rough estimate
-            'hoa_fees': random.randint(0, 300) if property_type in ['Condo', 'Townhouse'] else 0,
-            'city': city,
-            'state': state,
-            'zip_code': location['address_details'].get('postcode', '00000')
-        }
-    
-    def _get_comparable_sales_simulated(self, location: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Get comparable sales in the area"""
-        
-        # Mock comparable sales data
-        import random
-        
-        comparables = []
-        for i in range(5):
-            # Generate nearby coordinates
-            lat_offset = random.uniform(-0.01, 0.01)
-            lon_offset = random.uniform(-0.01, 0.01)
-            
-            comp = {
-                'address': f"{random.randint(100, 9999)} {random.choice(['Oak', 'Maple', 'Pine', 'Cedar'])} {random.choice(['St', 'Ave', 'Dr', 'Way'])}",
-                'sale_price': random.randint(300000, 800000),
-                'sale_date': f"2024-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-                'bedrooms': random.randint(2, 5),
-                'bathrooms': random.choice([1.5, 2, 2.5, 3]),
-                'square_feet': random.randint(1200, 3500),
-                'distance_miles': random.uniform(0.1, 1.5),
-                'lat': location['lat'] + lat_offset,
-                'lon': location['lon'] + lon_offset
-            }
-            comparables.append(comp)
-        
-        return comparables
-    
-    def _get_market_data_simulated(self, location: Dict[str, Any]) -> Dict[str, Any]:
-        """Get market statistics for the area"""
-        
-        import random
-        
-        return {
-            'median_home_value': random.randint(400000, 700000),
-            'market_trend': random.choice(['Rising', 'Stable', 'Declining']),
-            'days_on_market': random.randint(15, 60),
-            'price_per_sqft': random.randint(200, 400),
-            'market_temperature': random.choice(['Hot', 'Warm', 'Balanced', 'Cool']),
-            'inventory_months': random.uniform(1.5, 6.0),
-            'year_over_year_change': random.uniform(-5.0, 15.0)
-        }
     
     def search_properties(self, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Enhanced property search using multiple MLS providers and web scraping"""

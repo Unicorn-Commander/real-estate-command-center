@@ -23,13 +23,9 @@ class ColonelClient:
         self.property_service = PropertyService()
         self.lead_generator = LeadGenerator()
 
-        # Initialize with sample realistic leads
-        self._leads = self.lead_generator.generate_sample_leads(20)
-        self._campaigns = [
-            {'id': 1, 'name': 'Summer Sale', 'status': 'Active', 'start_date': '2024-06-01'},
-            {'id': 2, 'name': 'Holiday Promo', 'status': 'Planned', 'start_date': '2024-11-15'},
-            {'id': 3, 'name': 'Referral Drive', 'status': 'Completed', 'start_date': '2024-03-20'},
-        ]
+        # Initialize empty data - populate from real sources only
+        self._leads = []
+        self._campaigns = []
 
         # Specialized Agent Profiles with models
         self.agent_profiles = {

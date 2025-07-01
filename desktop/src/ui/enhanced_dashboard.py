@@ -32,7 +32,7 @@ class EnhancedDashboard(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarNever)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"""
             QScrollArea {{
                 background-color: {get_brand_color('bg_primary')};
@@ -195,13 +195,37 @@ class EnhancedDashboard(QWidget):
         """Create recent activity section"""
         activity_section = ModernSection("📈 Recent Activity")
         
-        # Activity items
-        activities = [
-            {"text": "CMA generated for 123 Oak Street", "time": "2 hours ago", "icon": "fa5s.chart-line"},
-            {"text": "New lead: Sarah Johnson - $450k budget", "time": "4 hours ago", "icon": "fa5s.user-plus"},
-            {"text": "Property listed: 456 Pine Avenue", "time": "1 day ago", "icon": "fa5s.home"},
-            {"text": "Marketing campaign launched", "time": "2 days ago", "icon": "fa5s.bullhorn"},
-        ]
+        # Activity items - only show real activity data
+        activities = []  # Will be populated from real data sources when available
+        
+        if not activities:
+            # Show empty state message
+            empty_frame = QFrame()
+            empty_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {get_brand_color('bg_secondary')};
+                    border: 2px dashed {get_brand_color('gray_600')};
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin: 4px 0;
+                }}
+            """)
+            
+            empty_layout = QVBoxLayout(empty_frame)
+            empty_layout.setAlignment(Qt.AlignCenter)
+            
+            empty_label = QLabel("No recent activity available")
+            empty_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {get_brand_color('gray_400')};
+                    font-size: 14px;
+                    font-style: italic;
+                }}
+            """)
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_layout.addWidget(empty_label)
+            
+            activity_section.add_widget(empty_frame)
         
         for activity in activities:
             activity_frame = QFrame()

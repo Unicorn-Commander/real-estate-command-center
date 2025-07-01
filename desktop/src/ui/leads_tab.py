@@ -110,7 +110,9 @@ class LeadsTab(QWidget):
         lead = self.model._leads[row]
         dlg = NewLeadDialog(self)
         dlg.name_input.setText(lead.get('name', ''))
+        dlg.phone_input.setText(lead.get('phone', ''))
         dlg.email_input.setText(lead.get('email', ''))
+        dlg.source_input.setText(lead.get('source', ''))
         idx = dlg.status_input.findText(lead.get('status', ''))
         if idx >= 0:
             dlg.status_input.setCurrentIndex(idx)
@@ -118,9 +120,7 @@ class LeadsTab(QWidget):
             data = dlg.get_data()
             # Update in client
             if self.colonel_client:
-                lead['name'] = data['name']
-                lead['email'] = data['email']
-                lead['status'] = data['status']
+                self.colonel_client.update_lead(lead['id'], data)
             self.load_data()
 
     def delete_lead(self, row):
@@ -131,6 +131,6 @@ class LeadsTab(QWidget):
             QMessageBox.Yes | QMessageBox.No
         )
         if resp == QMessageBox.Yes and self.colonel_client:
-            # Remove from client store
-            self.colonel_client._leads.pop(row)
+            # Remove from database
+            self.colonel_client.delete_lead(lead['id'])
             self.load_data()

@@ -79,14 +79,14 @@ def main():
     print("🚀 Initializing AI systems...")
     
     # Use enhanced colonel client with settings
+    colonel = None
     try:
         colonel = EnhancedColonelClient(current_settings)
         print("✅ Enhanced AI client initialized")
     except Exception as e:
-        print(f"⚠️ Enhanced client failed, falling back to legacy: {e}")
-        # Fallback to legacy client
-        api_url = current_settings.get('ai_backend', {}).get('ollama_url', API_URL)
-        colonel = ColonelClient(api_url)
+        print(f"❌ Failed to initialize Enhanced AI client: {e}")
+        print("Please check your settings and ensure all dependencies are met.")
+        sys.exit(1) # Exit the application if EnhancedColonelClient fails to initialize
     
     # Initialize KDE integration
     try:

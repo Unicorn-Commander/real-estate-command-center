@@ -432,7 +432,9 @@ AI/ML:
   - Ollama: 0.1.38+
   - Open Interpreter: 0.2.0+
   - Whisper: 20231117
-  - Qwen2.5: 7B-Instruct-Q4_K_M
+  - qwen2.5vl: q4_k_m
+  - qwen3: q4_k_m
+  - gemma3:4b-q4_k_m
 
 Databases:
   - PostgreSQL: 14+

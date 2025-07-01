@@ -522,7 +522,8 @@ This is the recommended backend for real estate workflows.
                     'property_analyst': self.property_analyst_edit.text().strip(),
                     'market_researcher': self.market_researcher_edit.text().strip(),
                     'lead_manager': self.lead_manager_edit.text().strip(),
-                    'marketing_expert': self.marketing_expert_edit.text().strip()
+                    'marketing_expert': self.marketing_expert_edit.text().strip(),
+                    'real_estate_agent': self.real_estate_agent_edit.text().strip()
                 }
             },
             'public_data': {

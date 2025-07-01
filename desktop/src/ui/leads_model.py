@@ -28,6 +28,10 @@ class LeadsModel(QAbstractTableModel):
         elif col == 2:
             return lead.get('email')
         elif col == 3:
+            return lead.get('phone')
+        elif col == 4:
+            return lead.get('source')
+        elif col == 5:
             return lead.get('status')
         return None
 

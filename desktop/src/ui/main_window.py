@@ -19,6 +19,8 @@ from ui.marketing_tab import MarketingTab
 from ui.database_tab import DatabaseTab
 from ui.dashboard_tab import DashboardTab
 from ui.cma_tab import CMATab
+from ui.properties_tab import PropertiesTab
+from ui.tasks_tab import TasksTab
 from ui.settings_dialog import SettingsDialog
 from ui.enhanced_settings_dialog import EnhancedSettingsDialog
 from ui.welcome_screen import WelcomeScreen
@@ -109,6 +111,8 @@ class MainWindow(QMainWindow):
         self.marketing_tab = MarketingTab(self.colonel_client)
         self.cma_tab = CMATab(self.colonel_client)
         self.database_tab = DatabaseTab(self.colonel_client)
+        self.properties_tab = PropertiesTab(self.colonel_client)
+        self.tasks_tab = TasksTab(self.colonel_client)
         
         # Add tabs with icons
         self.tabs.addTab(self.dashboard_tab, qta.icon('fa5s.tachometer-alt', color='#8B5CF6'), 'Dashboard')
@@ -116,6 +120,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.marketing_tab, qta.icon('fa5s.bullhorn', color='#EC4899'), 'Marketing')
         self.tabs.addTab(self.cma_tab, qta.icon('fa5s.chart-line', color='#10B981'), 'CMA')
         self.tabs.addTab(self.database_tab, qta.icon('fa5s.database', color='#EF4444'), 'Database')
+        self.tabs.addTab(self.properties_tab, qta.icon('fa5s.home', color='#F59E0B'), 'Properties')
+        self.tabs.addTab(self.tasks_tab, qta.icon('fa5s.tasks', color='#6B7280'), 'Tasks')
         
         self.content_splitter.addWidget(self.tabs)
         
@@ -321,6 +327,18 @@ class MainWindow(QMainWindow):
         self.action_new_cma.setToolTip(
             'Create a new Comparative Market Analysis (Ctrl+M)')
         self.action_new_cma.triggered.connect(self.new_cma)
+        # New Property
+        self.action_new_property = QAction(
+            qta.icon('fa5s.plus-square'), 'New Property', self)
+        self.action_new_property.setShortcut(QKeySequence('Ctrl+P'))
+        self.action_new_property.setToolTip('Add a new property (Ctrl+P)')
+        self.action_new_property.triggered.connect(self.properties_tab.on_new_property)
+        # New Task
+        self.action_new_task = QAction(
+            qta.icon('fa5s.check-square'), 'New Task', self)
+        self.action_new_task.setShortcut(QKeySequence('Ctrl+T'))
+        self.action_new_task.setToolTip('Add a new task (Ctrl+T)')
+        self.action_new_task.triggered.connect(self.tasks_tab.on_new_task)
         # Settings
         self.action_settings = QAction(
             qta.icon('fa5s.cog'), 'Settings...', self)
@@ -354,14 +372,16 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_new_lead)
         file_menu.addAction(self.action_new_campaign)
         file_menu.addAction(self.action_new_cma)
+        file_menu.addAction(self.action_new_property)
+        file_menu.addAction(self.action_new_task)
         file_menu.addAction(self.action_settings)
         file_menu.addSeparator()
         file_menu.addAction(self.action_exit)
-        
+
         # View menu for UI toggles
         view_menu = menubar.addMenu('View')
         view_menu.addAction(self.action_toggle_ai)
-        
+
         help_menu = menubar.addMenu('Help')
         help_menu.addAction(self.action_about)
 
@@ -373,6 +393,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_new_lead)
         toolbar.addAction(self.action_new_campaign)
         toolbar.addAction(self.action_new_cma)
+        toolbar.addAction(self.action_new_property)
+        toolbar.addAction(self.action_new_task)
         toolbar.addSeparator()
         toolbar.addAction(self.action_toggle_ai)
         toolbar.addAction(self.action_settings)
@@ -384,7 +406,7 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self):
         """Refresh all tabs and update status bar with timestamp."""
-        for tab in (self.leads_tab, self.marketing_tab, self.cma_tab, self.database_tab):
+        for tab in (self.leads_tab, self.marketing_tab, self.cma_tab, self.database_tab, self.properties_tab, self.tasks_tab):
             if hasattr(tab, 'load_data'):
                 tab.load_data()
         ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')

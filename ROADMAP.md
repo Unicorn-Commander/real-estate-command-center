@@ -21,7 +21,38 @@ This phase focuses on integrating with real-world data sources to move beyond si
 *   **School District Integration**:
     *   Integrate with school data APIs or databases to display school ratings, boundaries, and performance data for properties.
 
-## Phase 2: Automation & Workflow (Medium Priority)
+## Phase 2: Autonomous AI & Background Services (High Priority)
+
+This phase introduces autonomous AI agents and background services that continuously monitor, analyze, and take action without user intervention, creating a truly intelligent real estate assistant.
+
+### Key Initiatives:
+
+*   **Autonomous AI Agent Framework**:
+    *   Implement background AI agents that run continuously and autonomously
+    *   Create event-driven agent system that responds to market changes, new leads, and data updates
+    *   Develop agent coordination system for multi-agent collaboration
+*   **Market Monitor Agent**:
+    *   Continuously track market changes (price movements, new listings, sales)
+    *   Automatically alert agents to significant market shifts in their areas of interest
+    *   Generate weekly/monthly market intelligence reports
+*   **Lead Scoring & Qualification Agent**:
+    *   Automatically score and qualify new leads as they come in
+    *   Trigger follow-up recommendations based on lead behavior and profile
+    *   Identify high-value prospects for immediate attention
+*   **Property Watcher Service**:
+    *   Monitor specific properties for price changes, status updates, and market activity
+    *   Track comparable sales that could affect client properties
+    *   Alert agents when watched properties require action
+*   **Campaign Optimization Agent**:
+    *   Continuously analyze marketing campaign performance
+    *   Automatically adjust targeting and messaging based on engagement data
+    *   Recommend budget reallocation and strategy improvements
+*   **Data Refresh & Enhancement Service**:
+    *   Periodically update property and market data from all available APIs
+    *   Enhance existing records with new information as it becomes available
+    *   Maintain data quality and identify gaps requiring attention
+
+## Phase 3: Automation & Workflow (Medium Priority)
 
 This phase aims to automate repetitive tasks and streamline agent workflows, significantly boosting productivity and efficiency.
 
@@ -42,7 +73,7 @@ This phase aims to automate repetitive tasks and streamline agent workflows, sig
     *   Implement robust SMS and email notification triggers for critical events such as new leads, significant market changes, upcoming follow-ups, and document deadlines.
     *   Integrate with SMS gateway (e.g., Twilio).
 
-## Phase 3: Advanced Analytics & Portfolio Management (Medium Priority)
+## Phase 4: Advanced Analytics & Portfolio Management (Medium Priority)
 
 This phase focuses on providing deeper insights and sophisticated tools for investment analysis and managing multiple properties, catering to agents working with investors or managing their own portfolios.
 
@@ -75,7 +106,7 @@ Beyond the core features, a robust application needs comprehensive settings:
 
 ## III. Core Application Enhancements
 
-*   **Database Integration**: Currently, leads and campaigns seem to be in-memory. A persistent database (e.g., SQLite, PostgreSQL) is crucial for data integrity and scalability.
+*   **Database Integration**: **COMPLETED**. Leads, properties, and campaigns are now persistently stored in PostgreSQL, ensuring data integrity and scalability.
 *   **Error Handling & Logging**: More sophisticated error reporting, user-friendly error messages, and robust logging for debugging and support.
 *   **User Authentication & Authorization**: If multiple users or team features are envisioned, a secure login system and role-based access control.
 *   **Data Import/Export**: Enhanced CSV/JSON import/export for all data types (properties, comparables, market data).
@@ -101,6 +132,12 @@ Beyond the core features, a robust application needs comprehensive settings:
 *   **Security Audits**: Regular checks for vulnerabilities, especially with API key handling and external integrations.
 
 ## VI. Deployment and Maintenance
+
+## VII. Inspiration Projects
+
+*   **Movinin (aelassas/movinin)**: This open-source Rental Property Management Platform, despite its different technology stack (MERN), serves as a valuable source of inspiration for advanced features and UI/UX design patterns, particularly in areas like property management, booking, scheduling, and comprehensive notification systems. Its MIT license allows us to draw heavily from its functional and design concepts.
+
+
 
 *   **Packaging & Distribution**: Create installers for various Linux distributions (e.g., .deb, .rpm) and potentially other OS (Windows, macOS if PySide6 allows).
 *   **Update Mechanism**: Implement an in-app update system for seamless software upgrades.

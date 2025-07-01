@@ -3,9 +3,9 @@ Marketing Automation Tab with model/view, search, and context actions.
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel,
-    QTableView, QDialog, QFormLayout, QComboBox, QDialogButtonBox, QMenu, QMessageBox
+    QTableView, QDialog, QFormLayout, QComboBox, QDialogButtonBox, QMenu, QMessageBox, QGroupBox, QTextEdit
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel
+from PySide6.QtCore import Qt, QSortFilterProxyModel, Slot
 from ui.campaign_model import CampaignModel
 
 class NewCampaignDialog(QDialog):
@@ -56,6 +56,54 @@ class MarketingTab(QWidget):
         top_layout.addWidget(self.new_btn)
         layout.addLayout(top_layout)
 
+        # Content Generation Group
+        content_group = QGroupBox("AI Content Generation")
+        content_layout = QFormLayout(content_group)
+
+        self.content_type_combo = QComboBox()
+        self.content_type_combo.addItems(["Email", "SMS", "Social Media Post"])
+        content_layout.addRow("Content Type:", self.content_type_combo)
+
+        self.content_prompt_input = QLineEdit()
+        self.content_prompt_input.setPlaceholderText("e.g., Promote a new listing at 123 Main St")
+        content_layout.addRow("Prompt:", self.content_prompt_input)
+
+        self.generate_content_btn = QPushButton("Generate Content")
+        self.generate_content_btn.clicked.connect(self.generate_marketing_content)
+        content_layout.addRow(self.generate_content_btn)
+
+        self.generated_content_output = QTextEdit()
+        self.generated_content_output.setReadOnly(True)
+        self.generated_content_output.setPlaceholderText("Generated content will appear here...")
+        content_layout.addRow("Generated Content:", self.generated_content_output)
+
+        # Communication Group
+        comm_group = QGroupBox("Send Communication")
+        comm_layout = QFormLayout(comm_group)
+
+        self.recipient_email_input = QLineEdit()
+        self.recipient_email_input.setPlaceholderText("recipient@example.com")
+        comm_layout.addRow("Recipient Email:", self.recipient_email_input)
+
+        self.email_subject_input = QLineEdit()
+        self.email_subject_input.setPlaceholderText("Subject of the email")
+        comm_layout.addRow("Email Subject:", self.email_subject_input)
+
+        self.send_email_btn = QPushButton("Send Email")
+        self.send_email_btn.clicked.connect(self.send_email)
+        comm_layout.addRow(self.send_email_btn)
+
+        self.recipient_sms_input = QLineEdit()
+        self.recipient_sms_input.setPlaceholderText("+15551234567")
+        comm_layout.addRow("Recipient SMS:", self.recipient_sms_input)
+
+        self.send_sms_btn = QPushButton("Send SMS")
+        self.send_sms_btn.clicked.connect(self.send_sms)
+        comm_layout.addRow(self.send_sms_btn)
+
+        layout.addWidget(content_group)
+        layout.addWidget(comm_group)
+
         # Model and view
         self.model = CampaignModel([])
         self.proxy = QSortFilterProxyModel(self)
@@ -77,6 +125,70 @@ class MarketingTab(QWidget):
 
         # Initial load
         self.load_data()
+
+    @Slot()
+    def generate_marketing_content(self):
+        content_type = self.content_type_combo.currentText()
+        prompt = self.content_prompt_input.text().strip()
+        if not prompt:
+            QMessageBox.warning(self, "Input Error", "Please enter a prompt for content generation.")
+            return
+        
+        QMessageBox.information(self, "Generating Content", "Generating marketing content... This may take a moment.")
+        asyncio.create_task(self._fetch_generated_content(content_type, prompt))
+
+    async def _fetch_generated_content(self, content_type: str, prompt: str):
+        try:
+            generated_text = await self.colonel_client.generate_marketing_content(content_type, prompt)
+            self.generated_content_output.setText(generated_text)
+            QMessageBox.information(self, "Content Generated", "Marketing content generated successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred during content generation: {e}")
+
+    @Slot()
+    def send_email(self):
+        recipient = self.recipient_email_input.text().strip()
+        subject = self.email_subject_input.text().strip()
+        body = self.generated_content_output.toPlainText().strip()
+
+        if not recipient or not subject or not body:
+            QMessageBox.warning(self, "Input Error", "Please fill in recipient, subject, and generate content before sending email.")
+            return
+        
+        QMessageBox.information(self, "Sending Email", "Attempting to send email...")
+        asyncio.create_task(self._send_email_async(recipient, subject, body))
+
+    async def _send_email_async(self, recipient: str, subject: str, body: str):
+        try:
+            success = await self.colonel_client.send_email(recipient, subject, body)
+            if success:
+                QMessageBox.information(self, "Email Sent", "Email sent successfully!")
+            else:
+                QMessageBox.warning(self, "Email Failed", "Failed to send email. Check logs for details.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred while sending email: {e}")
+
+    @Slot()
+    def send_sms(self):
+        recipient_phone = self.recipient_sms_input.text().strip()
+        message = self.generated_content_output.toPlainText().strip()
+
+        if not recipient_phone or not message:
+            QMessageBox.warning(self, "Input Error", "Please fill in recipient phone and generate content before sending SMS.")
+            return
+        
+        QMessageBox.information(self, "Sending SMS", "Attempting to send SMS...")
+        asyncio.create_task(self._send_sms_async(recipient_phone, message))
+
+    async def _send_sms_async(self, recipient_phone: str, message: str):
+        try:
+            success = await self.colonel_client.send_sms(recipient_phone, message)
+            if success:
+                QMessageBox.information(self, "SMS Sent", "SMS sent successfully!")
+            else:
+                QMessageBox.warning(self, "SMS Failed", "Failed to send SMS. Check logs for details.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred while sending SMS: {e}")
 
     def load_data(self):
         campaigns = self.colonel_client.list_campaigns() if self.colonel_client else []

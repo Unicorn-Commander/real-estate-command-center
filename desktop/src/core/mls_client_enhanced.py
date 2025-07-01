@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class MLSClient:
     """Enhanced MLS Client supporting multiple providers"""
     
-    def __init__(self, provider: str = 'bridge'):
+    def __init__(self, provider: str = 'bridge', settings: Dict[str, Any] = None):
         """Initialize MLS client with specified provider
         
         Supported providers:
@@ -23,10 +23,17 @@ class MLSClient:
         """
         self.provider = provider.lower()
         self.api_configs = self._get_api_configurations()
+        self.settings = settings or {}
         
         # Set up provider-specific configuration
         config = self.api_configs.get(self.provider, {})
-        self.api_key = os.getenv(config.get('api_key_env', 'MLS_API_KEY'))
+        api_key_env_name = config.get('api_key_env', 'MLS_API_KEY')
+        self.api_key = self.settings.get('mls_providers', {}).get(api_key_env_name.lower(), '')
+        
+        if not self.api_key:
+            # Fallback to environment variable if not in settings
+            self.api_key = os.getenv(api_key_env_name)
+
         self.base_url = config.get('base_url', '')
         self.headers = config.get('headers', {})
         
@@ -268,8 +275,8 @@ class MLSClient:
     def get_comparable_sales(self, property_id: str, radius_miles: int = 5, limit: int = 5) -> List[Dict[str, Any]]:
         """Get comparable sales for a given property"""
         if not self.api_key:
-            logger.warning(f"No API key available for {self.provider}, returning mock comparables")
-            return self._get_mock_comparables()
+            logger.warning(f"No API key available for {self.provider}, comparables unavailable")
+            return []
             
         logger.info(f"Fetching comparable sales from {self.provider} for property ID: {property_id}")
         
@@ -278,7 +285,7 @@ class MLSClient:
             subject_property = self.get_property_details(property_id)
             if not subject_property:
                 logger.warning("Could not fetch subject property details for comparables")
-                return self._get_mock_comparables()
+                return []
             
             # Extract location and property characteristics
             lat = subject_property.get('Latitude') or subject_property.get('lat')
@@ -289,7 +296,7 @@ class MLSClient:
             
             if not (lat and lon):
                 logger.warning("No coordinates available for comparable search")
-                return self._get_mock_comparables()
+                return []
             
             # Build comparable search parameters
             if self.provider in ['bridge', 'mlsgrid']:  # RESO compliant
@@ -310,8 +317,8 @@ class MLSClient:
                 
             elif self.provider == 'estated':
                 # Estated doesn't have direct comparable search, would need custom logic
-                logger.info("Estated comparables search not yet implemented, using mock data")
-                return self._get_mock_comparables()
+                logger.info("Estated comparables search not yet implemented")
+                return []
                 
             else:
                 # Generic provider format
@@ -336,45 +343,14 @@ class MLSClient:
         except Exception as e:
             logger.error(f"Error fetching comparables from {self.provider}: {e}")
             
-        return self._get_mock_comparables()
+        return []
     
-    def _get_mock_comparables(self) -> List[Dict[str, Any]]:
-        """Return mock comparable sales data for testing"""
-        return [
-            {
-                "address": "123 Mock St, Anytown, CA",
-                "sale_price": 550000,
-                "sale_date": "2024-05-01", 
-                "bedrooms": 3,
-                "bathrooms": 2,
-                "square_feet": 1800,
-                "distance_miles": 0.5
-            },
-            {
-                "address": "456 Demo Ave, Anytown, CA",
-                "sale_price": 580000,
-                "sale_date": "2024-04-15",
-                "bedrooms": 4,
-                "bathrooms": 2.5,
-                "square_feet": 2200,
-                "distance_miles": 1.2
-            },
-            {
-                "address": "789 Test Blvd, Anytown, CA",
-                "sale_price": 525000,
-                "sale_date": "2024-03-20",
-                "bedrooms": 3,
-                "bathrooms": 2,
-                "square_feet": 1750,
-                "distance_miles": 0.8
-            }
-        ]
 
     def get_market_statistics(self, city: str, state: str) -> Optional[Dict[str, Any]]:
         """Get market statistics for a given city and state"""
         if not self.api_key:
-            logger.warning(f"No API key available for {self.provider}, returning mock market stats")
-            return self._get_mock_market_stats(city, state)
+            logger.warning(f"No API key available for {self.provider}, market data unavailable")
+            return {}
             
         logger.info(f"Fetching market statistics from {self.provider} for {city}, {state}")
         
@@ -402,8 +378,8 @@ class MLSClient:
                     
             elif self.provider == 'estated':
                 # Estated doesn't provide market statistics directly
-                logger.info("Estated market statistics not available, using mock data")
-                return self._get_mock_market_stats(city, state)
+                logger.info("Estated market statistics not available")
+                return {}
                 
             else:
                 # Generic provider format
@@ -422,7 +398,7 @@ class MLSClient:
         except Exception as e:
             logger.error(f"Error fetching market statistics from {self.provider}: {e}")
             
-        return self._get_mock_market_stats(city, state)
+        return {}
     
     def _calculate_market_stats(self, active_response: Dict, sold_response: Dict, city: str, state: str) -> Dict[str, Any]:
         """Calculate market statistics from active and sold listings"""
@@ -460,35 +436,6 @@ class MLSClient:
             'last_updated': datetime.now().isoformat()
         }
     
-    def _get_mock_market_stats(self, city: str, state: str) -> Dict[str, Any]:
-        """Return mock market statistics for testing"""
-        import random
-        
-        base_prices = {
-            'Portland': 650000, 'Seattle': 850000, 'San Francisco': 1500000,
-            'Austin': 450000, 'Denver': 550000, 'Miami': 400000,
-            'Phoenix': 375000, 'Atlanta': 325000, 'Dallas': 400000
-        }
-        
-        base_price = base_prices.get(city, 350000)
-        
-        return {
-            'location': f'{city}, {state}',
-            'total_active_listings': random.randint(50, 200),
-            'total_sales_last_year': random.randint(300, 1200), 
-            'median_list_price': int(base_price * random.uniform(0.9, 1.1)),
-            'median_sale_price': int(base_price * random.uniform(0.85, 1.05)),
-            'average_days_on_market': random.randint(20, 45),
-            'price_range': {
-                'min_active': int(base_price * 0.6),
-                'max_active': int(base_price * 2.5)
-            },
-            'market_activity': random.choice(['High', 'Moderate', 'Low']),
-            'market_temperature': random.choice(['Hot', 'Warm', 'Balanced', 'Cool']),
-            'data_source': 'Mock Data (No API Key)',
-            'last_updated': datetime.now().isoformat()
-        }
-    
     def test_connection(self) -> Dict[str, Any]:
         """Test the API connection and return provider info"""
         config = self.api_configs.get(self.provider, {})
@@ -519,32 +466,37 @@ class MLSClient:
 
 
 # Factory function for easy MLS client creation
-def create_mls_client(provider: str = 'bridge') -> MLSClient:
+def create_mls_client(provider: str = 'bridge', settings: Dict[str, Any] = None) -> MLSClient:
     """Factory function to create MLS client with specified provider
-    
-    Available providers:
-    - bridge: Bridge Interactive (free, requires MLS approval) 
-    - mlsgrid: MLS Grid (RESO compliant)
-    - rentspree: RentSpree API
-    - estated: Estated Public Records API (free tier)
-    - attom: ATTOM Data API
     """
-    return MLSClient(provider=provider)
+    return MLSClient(provider=provider, settings=settings)
 
 
 # Multi-provider MLS aggregator
 class MLSAggregator:
     """Aggregates data from multiple MLS providers for redundancy"""
     
-    def __init__(self, providers: List[str] = None):
+    def __init__(self, providers: List[str] = None, settings: Dict[str, Any] = None):
         """Initialize with list of provider names"""
+        self.settings = settings
         if providers is None:
-            providers = ['bridge', 'estated']  # Default to free/low-cost options
+            # Default to providers with API keys configured in settings
+            providers = []
+            if self.settings:
+                mls_settings = self.settings.get('mls_providers', {})
+                # Get API configurations from a dummy MLSClient instance
+                dummy_client = MLSClient()
+                for provider_name, config in dummy_client._get_api_configurations().items():
+                    api_key_name = config.get('api_key_env', '').lower()
+                    if mls_settings.get(api_key_name):
+                        providers.append(provider_name)
+            if not providers:
+                providers = ['bridge', 'estated'] # Fallback if no keys configured
             
         self.clients = {}
         for provider in providers:
             try:
-                self.clients[provider] = MLSClient(provider=provider)
+                self.clients[provider] = MLSClient(provider=provider, settings=self.settings)
                 logger.info(f"Initialized {provider} MLS client")
             except Exception as e:
                 logger.error(f"Failed to initialize {provider} MLS client: {e}")
