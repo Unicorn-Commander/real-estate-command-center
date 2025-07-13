@@ -15,5 +15,16 @@ services:
       - db_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: real_estate_searxng
+    restart: always
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml
+    environment:
+      SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
+
 volumes:
   db_data:

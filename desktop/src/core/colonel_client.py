@@ -213,7 +213,7 @@ Create compelling marketing strategies that convert.""",
             response = requests.post(
                 f"{self.ollama_url}/api/chat",
                 json=data,
-                timeout=120
+                timeout=300
             )
             
             if response.status_code == 200:

@@ -78,9 +78,8 @@ class EnhancedDashboard(QWidget):
         header_frame.setStyleSheet(f"""
             QFrame {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {get_brand_color('unicorn_primary')}, 
-                    stop:0.5 {get_brand_color('unicorn_secondary')},
-                    stop:1 {get_brand_color('unicorn_accent')});
+                    stop:0 {get_brand_color('bg_secondary')}, 
+                    stop:1 {get_brand_color('bg_primary')});
                 border-radius: 16px;
                 padding: 24px;
             }}

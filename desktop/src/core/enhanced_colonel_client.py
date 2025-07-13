@@ -1,19 +1,30 @@
 """
-Enhanced Colonel Client with Open Interpreter Integration
-Supports Ollama, OpenAI, and Open Interpreter backends
+Enhanced Colonel Client with Multiple AI Provider Support
+Supports: OpenAI, Anthropic, DeepSeek, Groq, xAI, OpenRouter, Ollama, and Open Interpreter
 """
 import sys
 import os
 import requests
 import json
 import re
-from typing import Dict, List, Any, Optional
+import logging
+from typing import Dict, List, Any, Optional, Union, Generator
 from core.property_service import PropertyService
 from core.lead_generator import LeadGenerator
 from core.settings_manager import settings_manager
+from core.ai_providers import AIProviderManager, AIModel
+from core.api_key_manager import api_key_manager
 import openai
-from core.real_estate_interpreter import RealEstateInterpreter
-from sqlalchemy import create_engine, text
+try:
+    from core.real_estate_interpreter import RealEstateInterpreter
+except ImportError:
+    RealEstateInterpreter = None
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from core.models import Base, Lead, Property, Campaign, Task
+from core.agents import AgentManager, MarketMonitorAgent, LeadScoringAgent, PropertyWatcherAgent, CampaignOptimizerAgent
+
+logger = logging.getLogger(__name__)
 
 class EnhancedColonelClient:
     """Enhanced AI client supporting multiple backends including Open Interpreter"""
@@ -22,14 +33,21 @@ class EnhancedColonelClient:
         self.settings = settings or settings_manager.get_all_settings()
         self.ai_settings = self.settings.get('ai_backend', {})
         
+        # Initialize AI provider manager
+        self.ai_manager = AIProviderManager()
+        
         # Initialize based on backend type
-        self.backend_type = self.ai_settings.get('backend_type', 'ollama')
+        self.backend_type = self.ai_settings.get('backend_type', 'auto')  # 'auto' selects best available
         self.ollama_url = self.ai_settings.get('ollama_url', 'http://localhost:11434')
         self.openai_api_key = self.ai_settings.get('openai_api_key', '')
         self.interpreter_mode = self.ai_settings.get('open_interpreter_mode', 'local')
+        self.prefer_cheap_models = self.ai_settings.get('prefer_cheap_models', False)
+        self.prefer_fast_models = self.ai_settings.get('prefer_fast_models', False)
 
         # Initialize database engine
         self.db_engine = create_engine("postgresql://realestate:commander123@localhost:5433/realestate_db")
+        Base.metadata.create_all(self.db_engine) # Create tables if they don't exist
+        self.Session = sessionmaker(bind=self.db_engine)
 
         # Initialize real data services
         self.property_service = PropertyService(
@@ -37,6 +55,21 @@ class EnhancedColonelClient:
             use_multiple_providers=self.settings.get('mls_providers', {}).get('use_multiple_providers', True),
             settings=self.settings
         )
+        
+        # Initialize MLS client for agent use
+        self.mls_client = self.property_service.primary_mls_client
+        
+        # Initialize Agent Manager
+        self.agent_manager = AgentManager(
+            ai_provider_manager=self.ai_manager,
+            colonel_client=self,
+            property_service=self.property_service,
+            mls_client=self.mls_client,
+            database=self.db_engine
+        )
+        
+        # Register all agents
+        self._register_agents()
 
         self._campaigns = [
             {'id': 1, 'name': 'Summer Sale', 'status': 'Active', 'start_date': '2024-06-01'},
@@ -47,11 +80,10 @@ class EnhancedColonelClient:
         # Get custom models from settings
         custom_models = self.ai_settings.get('custom_models', {})
         
-        # Specialized Agent Profiles with configurable models
+        # Specialized Agent Profiles with recommended models per provider
         self.agent_profiles = {
             'property_analyst': {
-                'ollama_model': custom_models.get('property_analyst', 'qwen2.5vl:q4_k_m'),
-                'openai_model': 'gpt-4o',
+                'name': 'Property Analyst',
                 'system_message': """You are a specialized Property Analysis Agent for real estate professionals.
 Your expertise includes:
 - Property valuation and assessment
@@ -61,11 +93,18 @@ Your expertise includes:
 - Market positioning recommendations
 
 Always provide data-driven insights with specific recommendations.""",
-                'name': 'Property Analyst'
+                'recommended_models': {
+                    'openai': 'gpt-4o',
+                    'anthropic': 'claude-sonnet-4-20250514',
+                    'deepseek': 'deepseek-reasoner',
+                    'groq': 'llama-3.3-70b-versatile',
+                    'xai': 'grok-4',
+                    'openrouter': 'anthropic/claude-3.5-sonnet',
+                    'ollama': custom_models.get('property_analyst', 'qwen2.5vl:q4_k_m')
+                }
             },
             'market_researcher': {
-                'ollama_model': custom_models.get('market_researcher', 'qwen3:q4_k_m'),
-                'openai_model': 'gpt-4o',
+                'name': 'Market Researcher',
                 'system_message': """You are a Market Research Specialist for real estate.
 Your expertise includes:
 - Local market trends and statistics
@@ -75,11 +114,18 @@ Your expertise includes:
 - Competitive market analysis
 
 Focus on actionable market intelligence and trends.""",
-                'name': 'Market Researcher'
+                'recommended_models': {
+                    'openai': 'gpt-4o',
+                    'anthropic': 'claude-sonnet-4-20250514',
+                    'deepseek': 'deepseek-chat',
+                    'groq': 'mixtral-8x7b-32768',
+                    'xai': 'grok-2-1212',
+                    'openrouter': 'openai/gpt-4o',
+                    'ollama': custom_models.get('market_researcher', 'qwen3:q4_k_m')
+                }
             },
             'lead_manager': {
-                'ollama_model': custom_models.get('lead_manager', 'gemma3:4b-q4_k_m'),
-                'openai_model': 'gpt-3.5-turbo',
+                'name': 'Lead Manager',
                 'system_message': """You are a Lead Management Specialist for real estate agents.
 Your expertise includes:
 - Lead qualification and scoring
@@ -89,11 +135,18 @@ Your expertise includes:
 - Client relationship management
 
 Provide practical lead nurturing strategies.""",
-                'name': 'Lead Manager'
+                'recommended_models': {
+                    'openai': 'gpt-4o-mini',
+                    'anthropic': 'claude-3-5-haiku-20241022',
+                    'deepseek': 'deepseek-chat',
+                    'groq': 'llama-3.1-8b-instant',
+                    'xai': 'grok-2-1212',
+                    'openrouter': 'meta-llama/llama-3.3-70b-instruct:free',
+                    'ollama': custom_models.get('lead_manager', 'gemma3:4b-q4_k_m')
+                }
             },
             'marketing_expert': {
-                'ollama_model': custom_models.get('marketing_expert', 'gemma3:4b-q4_k_m'),
-                'openai_model': 'gpt-3.5-turbo',
+                'name': 'Marketing Expert',
                 'system_message': """You are a Real Estate Marketing Expert.
 Your expertise includes:
 - Property listing optimization
@@ -103,11 +156,18 @@ Your expertise includes:
 - Target audience identification
 
 Create compelling marketing strategies that convert.""",
-                'name': 'Marketing Expert'
+                'recommended_models': {
+                    'openai': 'gpt-4o-mini',
+                    'anthropic': 'claude-3-5-haiku-20241022',
+                    'deepseek': 'deepseek-chat',
+                    'groq': 'gemma2-9b-it',
+                    'xai': 'grok-2-1212',
+                    'openrouter': 'google/gemini-2.0-flash-thinking-exp:free',
+                    'ollama': custom_models.get('marketing_expert', 'gemma3:4b-q4_k_m')
+                }
             },
             'real_estate_agent': {
-                'ollama_model': custom_models.get('real_estate_agent', 'llama3:8b'), # Assuming a capable model for complex tasks
-                'openai_model': 'gpt-4o',
+                'name': 'Real Estate Agent',
                 'system_message': """You are a highly skilled Real Estate Agent AI, specializing in contract review, negotiation strategies, and deal closing. Your expertise includes:
 - Analyzing real estate contracts for key clauses, risks, and opportunities.
 - Proposing effective negotiation tactics based on market conditions and client goals.
@@ -116,25 +176,109 @@ Create compelling marketing strategies that convert.""",
 - Assisting with offer drafting and counter-offer strategies.
 
 Always provide actionable advice and highlight critical information for the user.""",
-                'name': 'Real Estate Agent'
+                'recommended_models': {
+                    'openai': 'gpt-4o',
+                    'anthropic': 'claude-opus-4-20250514',
+                    'deepseek': 'deepseek-reasoner',
+                    'groq': 'llama-3.3-70b-versatile',
+                    'xai': 'grok-4-heavy',
+                    'openrouter': 'anthropic/claude-3.5-sonnet',
+                    'ollama': custom_models.get('real_estate_agent', 'llama3:8b')
+                }
             }
         }
         
+        # Available models cache
+        self._available_models = None
+        self._model_recommendations = None
+        
         # Initialize the selected backend
         self._init_backend()
+        self._test_connections()
     
-    def analyze_contract(self, contract_text: str) -> Dict[str, Any]:
-        """Analyzes a real estate contract for key terms, risks, and negotiation points.
-        This is a placeholder for future advanced contract analysis.
-        """
-        print(f"[REAL ESTATE AGENT AI] Analyzing contract (first 100 chars): {contract_text[:100]}...")
-        # In a real implementation, this would involve sending the contract_text
-        # to the 'real_estate_agent' AI for detailed analysis.
-        # For now, return a mock response.
+    def _test_connections(self):
+        """Test all AI provider connections"""
+        logger.info("Testing AI provider connections...")
+        results = self.ai_manager.test_all_connections()
+        
+        for provider, result in results.items():
+            if result['status'] == 'success':
+                logger.info(f"✅ {provider}: Connected")
+            else:
+                logger.info(f"⚠️ {provider}: {result['message']}")
+    
+    def get_available_models(self) -> List[AIModel]:
+        """Get all available AI models"""
+        if self._available_models is None:
+            self._available_models = self.ai_manager.list_all_models()
+        return self._available_models
+    
+    def get_model_for_agent(self, agent_type: str, quality: str = 'good', 
+                           prefer_cheap: bool = None, prefer_fast: bool = None) -> Optional[str]:
+        """Get the best model for a specific agent type"""
+        # Use global preferences if not specified
+        if prefer_cheap is None:
+            prefer_cheap = self.prefer_cheap_models
+        if prefer_fast is None:
+            prefer_fast = self.prefer_fast_models
+            
+        if agent_type not in self.agent_profiles:
+            return None
+            
+        profile = self.agent_profiles[agent_type]
+        available_models = self.get_available_models()
+        
+        # First try recommended models
+        quality_levels = ['basic', 'good', 'excellent', 'frontier']
+        for provider, model_id in profile['recommended_models'].items():
+            if any(m.id == model_id for m in available_models):
+                model = next(m for m in available_models if m.id == model_id)
+                
+                # Check if it meets quality requirements
+                if quality_levels.index(model.quality) >= quality_levels.index(quality):
+                    if prefer_cheap and model.input_cost > 5.0:  # Skip expensive models
+                        continue
+                    if prefer_fast and model.speed in ['slow', 'medium']:  # Skip slow models
+                        continue
+                    return model_id
+                    
+        # Fallback to finding any suitable model
+        if prefer_cheap:
+            model = self.ai_manager.get_cheapest_model(quality)
+        elif prefer_fast:
+            model = self.ai_manager.get_fastest_model(quality)
+        else:
+            # Get any model meeting quality requirements
+            suitable_models = [m for m in available_models 
+                             if quality_levels.index(m.quality) >= quality_levels.index(quality)]
+            if suitable_models:
+                model = suitable_models[0]
+            else:
+                model = None
+                
+        return model.id if model else None
+    
+    def analyze_contract(self, contract_text: str, model_preference: str = None) -> Dict[str, Any]:
+        """Analyzes a real estate contract using AI"""
+        prompt = f"""Analyze this real estate contract for key terms, risks, and negotiation points:
+
+{contract_text}
+
+Provide:
+1. Summary of key terms and conditions
+2. Identified risks or concerning clauses
+3. Potential negotiation points
+4. Recommended actions
+
+Format your response with clear sections."""
+        
+        model_id = model_preference or self.get_model_for_agent('real_estate_agent', quality='excellent')
+        response = self.chat_with_agent(prompt, 'real_estate_agent', model_id=model_id)
+        
         return {
-            "summary": "Mock contract summary: Key terms identified, potential negotiation points highlighted.",
-            "risks": ["Mock risk: Clause X might be unfavorable."],
-            "negotiation_points": ["Mock negotiation: Push for a lower closing cost."]
+            'analysis': response,
+            'model_used': model_id,
+            'status': 'completed'
         }
     
     def _init_backend(self):
@@ -142,16 +286,73 @@ Always provide actionable advice and highlight critical information for the user
         self.available_agents = {}
         self.backend_ready = False
         
-        if self.backend_type == 'openai':
-            self._init_openai()
+        # If backend_type is 'auto', determine the best available backend
+        if self.backend_type == 'auto':
+            available_providers = list(self.ai_manager.providers.keys())
+            if available_providers:
+                # Prefer providers in this order
+                preferred_order = ['openai', 'anthropic', 'deepseek', 'groq', 'openrouter', 'xai', 'ollama']
+                for provider in preferred_order:
+                    if provider in available_providers:
+                        self.backend_type = provider
+                        break
+                else:
+                    self.backend_type = available_providers[0]
+                logger.info(f"Auto-selected backend: {self.backend_type}")
+            else:
+                # Fall back to legacy backends
+                if self._check_ollama_available():
+                    self.backend_type = 'ollama'
+                elif self.backend_type == 'open_interpreter':
+                    self.backend_type = 'open_interpreter'
+                else:
+                    logger.warning("No AI backend available")
+                    return
+        
+        # Initialize modern AI providers
+        if self.backend_type in ['openai', 'anthropic', 'deepseek', 'groq', 'xai', 'openrouter']:
+            self._init_ai_provider()
+        # Legacy backends
         elif self.backend_type == 'ollama':
             self._init_ollama()
         elif self.backend_type == 'open_interpreter':
             self._init_open_interpreter()
-        elif self.backend_type == 'real_estate_interpreter':
+        elif self.backend_type == 'real_estate_interpreter' and RealEstateInterpreter:
             self._init_real_estate_interpreter()
         else:
-            print(f"⚠️ Unknown backend type: {self.backend_type}")
+            logger.warning(f"Unknown backend type: {self.backend_type}")
+    
+    def _check_ollama_available(self) -> bool:
+        """Check if Ollama is available"""
+        try:
+            response = requests.get(f"{self.ollama_url}/api/tags", timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def _init_ai_provider(self):
+        """Initialize modern AI provider backend"""
+        provider = self.ai_manager.get_provider(self.backend_type)
+        if not provider:
+            logger.warning(f"Provider {self.backend_type} not configured")
+            return
+            
+        # Set up available agents for this provider
+        for agent_type, profile in self.agent_profiles.items():
+            # Get the best model for this agent
+            model_id = self.get_model_for_agent(agent_type)
+            if model_id:
+                self.available_agents[agent_type] = {
+                    'model': model_id,
+                    'system_message': profile['system_message'],
+                    'name': profile['name']
+                }
+                logger.info(f"✅ {profile['name']} ready with {model_id}")
+            else:
+                logger.warning(f"⚠️ No suitable model for {profile['name']}")
+        
+        self.backend_ready = len(self.available_agents) > 0
+        logger.info(f"✅ {self.backend_type} backend ready ({len(self.available_agents)}/{len(self.agent_profiles)} agents)")
     
     def _init_openai(self):
         """Initialize OpenAI backend"""
@@ -282,11 +483,17 @@ Always prioritize data-driven responses and actionable recommendations."""
         except Exception as e:
             print(f"⚠️ Could not initialize Real Estate Interpreter: {e}")
     
-    def chat_with_agent(self, message: str, agent_type: str = 'property_analyst', stream: bool = False) -> str:
-        """Send a message to a specialized agent"""
-        if not self.backend_ready:
-            return "AI backend is not configured or available. Please check settings."
+    def chat_with_agent(self, message: str, agent_type: str = 'property_analyst', 
+                       model_id: str = None, stream: bool = False, **kwargs) -> Union[str, Generator[str, None, None]]:
+        """Send a message to a specialized agent using the best available model"""
+        if not self.backend_ready and not self.ai_manager.providers:
+            return "No AI backend is configured or available. Please check settings."
         
+        # If using modern AI providers
+        if self.backend_type in ['openai', 'anthropic', 'deepseek', 'groq', 'xai', 'openrouter'] or model_id:
+            return self._chat_with_ai_provider(message, agent_type, model_id, stream, **kwargs)
+        
+        # Legacy backend handling
         if agent_type not in self.available_agents:
             available = list(self.available_agents.keys())
             return f"Agent {agent_type} not available. Available agents: {available}"
@@ -299,9 +506,6 @@ Always prioritize data-driven responses and actionable recommendations."""
         if self.backend_type == 'ollama':
             return self._chat_with_ollama(enhanced_message, agent_config['model'], 
                                         agent_config['system_message'], agent_config['name'], stream)
-        elif self.backend_type == 'openai':
-            return self._chat_with_openai(enhanced_message, agent_config['model'], 
-                                        agent_config['system_message'], agent_config['name'], stream)
         elif self.backend_type == 'open_interpreter':
             return self._chat_with_interpreter(enhanced_message, agent_config['system_message'], 
                                              agent_config['name'])
@@ -310,6 +514,45 @@ Always prioritize data-driven responses and actionable recommendations."""
                                                           agent_config['name'])
         else:
             return "Unknown backend type configured."
+    
+    def _chat_with_ai_provider(self, message: str, agent_type: str, model_id: str = None, 
+                              stream: bool = False, **kwargs) -> Union[str, Generator[str, None, None]]:
+        """Chat using modern AI providers"""
+        if agent_type not in self.agent_profiles:
+            available = list(self.agent_profiles.keys())
+            return f"Agent {agent_type} not available. Available agents: {available}"
+            
+        # Get model if not specified
+        if not model_id:
+            model_id = self.get_model_for_agent(agent_type, **kwargs)
+            if not model_id:
+                return f"No suitable AI model available for {agent_type}"
+                
+        # Enhance message with property data if applicable
+        enhanced_message = self._enhance_message_with_property_data(message)
+        
+        # Prepare messages
+        profile = self.agent_profiles[agent_type]
+        messages = [
+            {"role": "system", "content": profile['system_message']},
+            {"role": "user", "content": enhanced_message}
+        ]
+        
+        try:
+            response = self.ai_manager.chat(messages, model_id, stream, **kwargs)
+            
+            if stream:
+                def generate():
+                    yield f"[{profile['name']} via {model_id}]: "
+                    for chunk in response:
+                        yield chunk
+                return generate()
+            else:
+                return f"[{profile['name']} via {model_id}]: {response}"
+                
+        except Exception as e:
+            logger.error(f"Error chatting with {model_id}: {e}")
+            return f"[{profile['name']}]: Error - {str(e)[:200]}"
     
     def _chat_with_openai(self, message: str, model: str, system_message: str, agent_name: str, stream: bool = False) -> str:
         """Chat with OpenAI API"""
@@ -353,7 +596,7 @@ Always prioritize data-driven responses and actionable recommendations."""
             response = requests.post(
                 f"{self.ollama_url}/api/chat",
                 json=data,
-                timeout=120
+                timeout=300
             )
             
             if response.status_code == 200:
@@ -506,28 +749,110 @@ COMPARABLE SALES:
         
         self.settings = new_settings
         self.ai_settings = self.settings.get('ai_backend', {})
-        self.backend_type = self.ai_settings.get('backend_type', 'ollama')
+        self.backend_type = self.ai_settings.get('backend_type', 'auto')
+        self.prefer_cheap_models = self.ai_settings.get('prefer_cheap_models', False)
+        self.prefer_fast_models = self.ai_settings.get('prefer_fast_models', False)
+        
+        # Reinitialize AI manager with new settings
+        self.ai_manager = AIProviderManager()
+        
+        # Clear caches
+        self._available_models = None
+        self._model_recommendations = None
         
         # Reinitialize if backend changed
         if old_backend != self.backend_type:
             self._init_backend()
+            self._test_connections()
         
         # Update property service settings
         mls_settings = self.settings.get('mls_providers', {})
         self.property_service = PropertyService(
             preferred_mls_provider=mls_settings.get('preferred_provider', 'bridge'),
-            use_multiple_providers=mls_settings.get('use_multiple_providers', True)
+            use_multiple_providers=mls_settings.get('use_multiple_providers', True),
+            settings=new_settings
         )
     
     def get_backend_status(self) -> Dict[str, Any]:
         """Get current backend status information"""
-        return {
+        status = {
             'backend_type': self.backend_type,
             'backend_ready': self.backend_ready,
             'available_agents': len(self.available_agents),
             'total_agents': len(self.agent_profiles),
-            'agent_names': [config['name'] for config in self.available_agents.values()]
+            'agent_names': [config['name'] for config in self.available_agents.values()],
+            'available_providers': list(self.ai_manager.providers.keys()),
+            'total_models': len(self.get_available_models())
         }
+        
+        # Add model recommendations
+        if not self._model_recommendations:
+            self._model_recommendations = self.get_model_recommendations()
+        status['model_recommendations'] = self._model_recommendations
+        
+        return status
+    
+    def get_model_recommendations(self) -> Dict[str, Any]:
+        """Get recommendations for which models to use for different tasks"""
+        recommendations = {}
+        
+        for agent_type in self.agent_profiles.keys():
+            task_name = agent_type.replace('_', ' ').title()
+            recommendations[task_name] = {
+                'best_quality': self.get_model_for_agent(agent_type, quality='frontier'),
+                'best_value': self.get_model_for_agent(agent_type, quality='good', prefer_cheap=True),
+                'fastest': self.get_model_for_agent(agent_type, quality='good', prefer_fast=True)
+            }
+            
+        return recommendations
+    
+    def estimate_cost(self, message: str, agent_type: str = 'property_analyst', 
+                     model_id: str = None, expected_response_tokens: int = 1000) -> Dict[str, float]:
+        """Estimate the cost of a query"""
+        if not model_id:
+            model_id = self.get_model_for_agent(agent_type)
+            
+        available_models = self.get_available_models()
+        model = next((m for m in available_models if m.id == model_id), None)
+        
+        if not model:
+            return {'error': f'Model {model_id} not found'}
+            
+        # Rough token estimation (1 token ≈ 4 characters)
+        input_tokens = len(message) / 4
+        
+        input_cost = (input_tokens / 1_000_000) * model.input_cost
+        output_cost = (expected_response_tokens / 1_000_000) * model.output_cost
+        
+        return {
+            'model': model_id,
+            'provider': model.provider,
+            'estimated_input_tokens': int(input_tokens),
+            'estimated_output_tokens': expected_response_tokens,
+            'input_cost': round(input_cost, 6),
+            'output_cost': round(output_cost, 6),
+            'total_cost': round(input_cost + output_cost, 6),
+            'cost_per_million_tokens': (model.input_cost + model.output_cost) / 2
+        }
+    
+    def compare_multi_agent_responses(self, query: str, agents: List[str] = None) -> Dict[str, str]:
+        """Get responses from multiple agents for comparison"""
+        if not agents:
+            agents = list(self.agent_profiles.keys())
+            
+        responses = {}
+        
+        for agent in agents:
+            if agent in self.agent_profiles:
+                try:
+                    # Use different models for variety
+                    model_id = self.get_model_for_agent(agent, prefer_cheap=True)
+                    response = self.chat_with_agent(query, agent, model_id=model_id)
+                    responses[self.agent_profiles[agent]['name']] = response
+                except Exception as e:
+                    responses[self.agent_profiles[agent]['name']] = f"Error: {str(e)}"
+                    
+        return responses
     
     # Legacy compatibility methods
     def ping(self) -> bool:
@@ -535,228 +860,239 @@ COMPARABLE SALES:
     
     # Leads
     def list_leads(self):
-        """Return list of leads from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(text(
-                "SELECT id, name, phone, email, source, status, last_contact FROM leads ORDER BY last_contact DESC"
-            ))
-            leads = [dict(row) for row in result.mappings()]
-            return leads
+        """Return list of leads from the database using ORM."""
+        session = self.Session()
+        try:
+            leads = session.query(Lead).order_by(Lead.last_contact.desc()).all()
+            return [l.__dict__ for l in leads] # Convert to dictionary for compatibility
+        finally:
+            session.close()
     
-    def create_lead(self, name: str, email: str, status: str) -> dict:
-        """Create a new lead in the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("INSERT INTO leads (name, email, status, last_contact) VALUES (:name, :email, :status, NOW()) RETURNING id"),
-                {"name": name, "email": email, "status": status}
-            )
-            conn.commit()
-            new_id = result.scalar_one()
-            return {'id': new_id, 'name': name, 'email': email, 'status': status}
+    def create_lead(self, name: str, email: str, status: str, phone: str = None, source: str = None) -> dict:
+        """Create a new lead in the database using ORM."""
+        session = self.Session()
+        try:
+            new_lead = Lead(name=name, email=email, status=status, phone=phone, source=source)
+            session.add(new_lead)
+            session.commit()
+            session.refresh(new_lead)
+            return new_lead.__dict__
+        finally:
+            session.close()
 
     def update_lead(self, lead_id: int, data: dict):
-        """Update an existing lead in the database."""
-        set_clauses = []
-        params = {"id": lead_id}
-        for key, value in data.items():
-            set_clauses.append(f"{key} = :{key}")
-            params[key] = value
-        
-        if not set_clauses:
-            return None # No data to update
-
-        query = text(f"UPDATE leads SET {', '.join(set_clauses)} WHERE id = :id")
-        with self.db_engine.connect() as conn:
-            conn.execute(query, params)
-            conn.commit()
-            return self.get_lead(lead_id) # Fetch updated lead
+        """Update an existing lead in the database using ORM."""
+        session = self.Session()
+        try:
+            lead = session.query(Lead).filter_by(id=lead_id).first()
+            if lead:
+                for key, value in data.items():
+                    setattr(lead, key, value)
+                session.commit()
+                session.refresh(lead)
+                return lead.__dict__
+            return None
+        finally:
+            session.close()
 
     def delete_lead(self, lead_id: int):
-        """Delete a lead from the database."""
-        with self.db_engine.connect() as conn:
-            conn.execute(text("DELETE FROM leads WHERE id = :id"), {"id": lead_id})
-            conn.commit()
+        """Delete a lead from the database using ORM."""
+        session = self.Session()
+        try:
+            lead = session.query(Lead).filter_by(id=lead_id).first()
+            if lead:
+                session.delete(lead)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
 
     def get_lead(self, lead_id: int):
-        """Retrieve a single lead by ID from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT id, name, phone, email, source, status, last_contact FROM leads WHERE id = :id"),
-                {"id": lead_id}
-            )
-            lead = result.mappings().first()
-            return dict(lead) if lead else None
+        """Retrieve a single lead by ID from the database using ORM."""
+        session = self.Session()
+        try:
+            lead = session.query(Lead).filter_by(id=lead_id).first()
+            return lead.__dict__ if lead else None
+        finally:
+            session.close()
 
     # Properties
     def create_property(self, data: Dict[str, Any]) -> dict:
-        """Create a new property in the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("""INSERT INTO properties (
-                    address, city, state, zip_code, property_type, bedrooms, bathrooms, square_feet, lot_size, year_built, listing_price, listing_status, mls_id
-                ) VALUES (
-                    :address, :city, :state, :zip_code, :property_type, :bedrooms, :bathrooms, :square_feet, :lot_size, :year_built, :listing_price, :listing_status, :mls_id
-                ) RETURNING id"""),
-                data
-            )
-            conn.commit()
-            new_id = result.scalar_one()
-            return {**data, "id": new_id}
+        """Create a new property in the database using ORM."""
+        session = self.Session()
+        try:
+            new_property = Property(**data)
+            session.add(new_property)
+            session.commit()
+            session.refresh(new_property)
+            return new_property.__dict__
+        finally:
+            session.close()
 
     def list_properties(self) -> List[Dict[str, Any]]:
-        """Return list of properties from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(text(
-                "SELECT id, address, city, state, zip_code, property_type, bedrooms, bathrooms, square_feet, lot_size, year_built, listing_price, listing_status, mls_id, date_added, last_updated FROM properties ORDER BY last_updated DESC"
-            ))
-            properties = [dict(row) for row in result.mappings()]
-            return properties
+        """Return list of properties from the database using ORM."""
+        session = self.Session()
+        try:
+            properties = session.query(Property).order_by(Property.last_updated.desc()).all()
+            return [p.__dict__ for p in properties]
+        finally:
+            session.close()
 
     def update_property(self, property_id: int, data: Dict[str, Any]):
-        """Update an existing property in the database."""
-        set_clauses = []
-        params = {"id": property_id}
-        for key, value in data.items():
-            set_clauses.append(f"{key} = :{key}")
-            params[key] = value
-        
-        if not set_clauses:
-            return None # No data to update
-
-        query = text(f"UPDATE properties SET {', '.join(set_clauses)}, last_updated = NOW() WHERE id = :id")
-        with self.db_engine.connect() as conn:
-            conn.execute(query, params)
-            conn.commit()
-            return self.get_property(property_id) # Fetch updated property
+        """Update an existing property in the database using ORM."""
+        session = self.Session()
+        try:
+            prop = session.query(Property).filter_by(id=property_id).first()
+            if prop:
+                for key, value in data.items():
+                    setattr(prop, key, value)
+                session.commit()
+                session.refresh(prop)
+                return prop.__dict__
+            return None
+        finally:
+            session.close()
 
     def delete_property(self, property_id: int):
-        """Delete a property from the database."""
-        with self.db_engine.connect() as conn:
-            conn.execute(text("DELETE FROM properties WHERE id = :id"), {"id": property_id})
-            conn.commit()
+        """Delete a property from the database using ORM."""
+        session = self.Session()
+        try:
+            prop = session.query(Property).filter_by(id=property_id).first()
+            if prop:
+                session.delete(prop)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
 
     def get_property(self, property_id: int):
-        """Retrieve a single property by ID from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT id, address, city, state, zip_code, property_type, bedrooms, bathrooms, square_feet, lot_size, year_built, listing_price, listing_status, mls_id, date_added, last_updated FROM properties WHERE id = :id"),
-                {"id": property_id}
-            )
-            prop = result.mappings().first()
-            return dict(prop) if prop else None
+        """Retrieve a single property by ID from the database using ORM."""
+        session = self.Session()
+        try:
+            prop = session.query(Property).filter_by(id=property_id).first()
+            return prop.__dict__ if prop else None
+        finally:
+            session.close()
     
     # Campaigns
     def list_campaigns(self) -> List[Dict[str, Any]]:
-        """Return list of campaigns from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(text(
-                "SELECT id, name, status, start_date, date_created, last_updated FROM campaigns ORDER BY last_updated DESC"
-            ))
-            campaigns = [dict(row) for row in result.mappings()]
-            return campaigns
+        """Return list of campaigns from the database using ORM."""
+        session = self.Session()
+        try:
+            campaigns = session.query(Campaign).order_by(Campaign.last_updated.desc()).all()
+            return [c.__dict__ for c in campaigns]
+        finally:
+            session.close()
 
     def create_campaign(self, name: str, status: str, start_date: str) -> dict:
-        """Create a new campaign in the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("INSERT INTO campaigns (name, status, start_date) VALUES (:name, :status, :start_date) RETURNING id"),
-                {"name": name, "status": status, "start_date": start_date}
-            )
-            conn.commit()
-            new_id = result.scalar_one()
-            return {'id': new_id, 'name': name, 'status': status, 'start_date': start_date}
+        """Create a new campaign in the database using ORM."""
+        session = self.Session()
+        try:
+            new_campaign = Campaign(name=name, status=status, start_date=start_date)
+            session.add(new_campaign)
+            session.commit()
+            session.refresh(new_campaign)
+            return new_campaign.__dict__
+        finally:
+            session.close()
 
     def update_campaign(self, campaign_id: int, data: dict):
-        """Update existing campaign in the database."""
-        set_clauses = []
-        params = {"id": campaign_id}
-        for key, value in data.items():
-            set_clauses.append(f"{key} = :{key}")
-            params[key] = value
-        
-        if not set_clauses:
-            return None # No data to update
-
-        query = text(f"UPDATE campaigns SET {', '.join(set_clauses)}, last_updated = NOW() WHERE id = :id")
-        with self.db_engine.connect() as conn:
-            conn.execute(query, params)
-            conn.commit()
-            return self.get_campaign(campaign_id) # Fetch updated campaign
+        """Update existing campaign in the database using ORM."""
+        session = self.Session()
+        try:
+            campaign = session.query(Campaign).filter_by(id=campaign_id).first()
+            if campaign:
+                for key, value in data.items():
+                    setattr(campaign, key, value)
+                session.commit()
+                session.refresh(campaign)
+                return campaign.__dict__
+            return None
+        finally:
+            session.close()
 
     def delete_campaign(self, campaign_id: int):
-        """Delete a campaign from the database."""
-        with self.db_engine.connect() as conn:
-            conn.execute(text("DELETE FROM campaigns WHERE id = :id"), {"id": campaign_id})
-            conn.commit()
+        """Delete a campaign from the database using ORM."""
+        session = self.Session()
+        try:
+            campaign = session.query(Campaign).filter_by(id=campaign_id).first()
+            if campaign:
+                session.delete(campaign)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
 
     def get_campaign(self, campaign_id: int):
-        """Retrieve a single campaign by ID from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT id, name, status, start_date, date_created, last_updated FROM campaigns WHERE id = :id"),
-                {"id": campaign_id}
-            )
-            campaign = result.mappings().first()
-            return dict(campaign) if campaign else None
+        """Retrieve a single campaign by ID from the database using ORM."""
+        session = self.Session()
+        try:
+            campaign = session.query(Campaign).filter_by(id=campaign_id).first()
+            return campaign.__dict__ if campaign else None
+        finally:
+            session.close()
 
     # Tasks
     def create_task(self, data: Dict[str, Any]) -> dict:
-        """Create a new task in the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("""INSERT INTO tasks (
-                    title, description, due_date, status, priority, assigned_to, lead_id, property_id
-                ) VALUES (
-                    :title, :description, :due_date, :status, :priority, :assigned_to, :lead_id, :property_id
-                ) RETURNING id"""
-                ),
-                data
-            )
-            conn.commit()
-            new_id = result.scalar_one()
-            return {**data, "id": new_id}
+        """Create a new task in the database using ORM."""
+        session = self.Session()
+        try:
+            new_task = Task(**data)
+            session.add(new_task)
+            session.commit()
+            session.refresh(new_task)
+            return new_task.__dict__
+        finally:
+            session.close()
 
     def list_tasks(self) -> List[Dict[str, Any]]:
-        """Return list of tasks from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(text(
-                "SELECT id, title, description, due_date, status, priority, assigned_to, lead_id, property_id, date_created, last_updated FROM tasks ORDER BY due_date ASC"
-            ))
-            tasks = [dict(row) for row in result.mappings()]
-            return tasks
+        """Return list of tasks from the database using ORM."""
+        session = self.Session()
+        try:
+            tasks = session.query(Task).order_by(Task.due_date.asc()).all()
+            return [t.__dict__ for t in tasks]
+        finally:
+            session.close()
 
     def update_task(self, task_id: int, data: Dict[str, Any]):
-        """Update an existing task in the database."""
-        set_clauses = []
-        params = {"id": task_id}
-        for key, value in data.items():
-            set_clauses.append(f"{key} = :{key}")
-            params[key] = value
-        
-        if not set_clauses:
-            return None # No data to update
-
-        query = text(f"UPDATE tasks SET {', '.join(set_clauses)}, last_updated = NOW() WHERE id = :id")
-        with self.db_engine.connect() as conn:
-            conn.execute(query, params)
-            conn.commit()
-            return self.get_task(task_id) # Fetch updated task
+        """Update an existing task in the database using ORM."""
+        session = self.Session()
+        try:
+            task = session.query(Task).filter_by(id=task_id).first()
+            if task:
+                for key, value in data.items():
+                    setattr(task, key, value)
+                session.commit()
+                session.refresh(task)
+                return task.__dict__
+            return None
+        finally:
+            session.close()
 
     def delete_task(self, task_id: int):
-        """Delete a task from the database."""
-        with self.db_engine.connect() as conn:
-            conn.execute(text("DELETE FROM tasks WHERE id = :id"), {"id": task_id})
-            conn.commit()
+        """Delete a task from the database using ORM."""
+        session = self.Session()
+        try:
+            task = session.query(Task).filter_by(id=task_id).first()
+            if task:
+                session.delete(task)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
 
     def get_task(self, task_id: int):
-        """Retrieve a single task by ID from the database."""
-        with self.db_engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT id, title, description, due_date, status, priority, assigned_to, lead_id, property_id, date_created, last_updated FROM tasks WHERE id = :id"),
-                {"id": task_id}
-            )
-            task = result.mappings().first()
-            return dict(task) if task else None
+        """Retrieve a single task by ID from the database using ORM."""
+        session = self.Session()
+        try:
+            task = session.query(Task).filter_by(id=task_id).first()
+            return task.__dict__ if task else None
+        finally:
+            session.close()
 
     # Marketing Automation
     async def generate_marketing_content(self, content_type: str, prompt: str) -> str:
@@ -775,3 +1111,30 @@ COMPARABLE SALES:
         print(f"[SMS SERVICE] Sending SMS to {recipient_phone} with message: {message[:100]}...")
         # TODO: Integrate with a real SMS gateway (e.g., Twilio)
         return True # Simulate success
+    
+    def _register_agents(self):
+        """Register all autonomous agents with the agent manager"""
+        try:
+            # Market Monitor Agent
+            market_monitor = MarketMonitorAgent()
+            self.agent_manager.register_agent(market_monitor, auto_start=True)
+            
+            # Lead Scoring Agent
+            lead_scorer = LeadScoringAgent()
+            self.agent_manager.register_agent(lead_scorer, auto_start=True)
+            
+            # Property Watcher Agent
+            property_watcher = PropertyWatcherAgent()
+            self.agent_manager.register_agent(property_watcher, auto_start=True)
+            
+            # Campaign Optimizer Agent
+            campaign_optimizer = CampaignOptimizerAgent()
+            self.agent_manager.register_agent(campaign_optimizer, auto_start=True)
+            
+            logger.info("All autonomous agents registered successfully")
+        except Exception as e:
+            logger.error(f"Failed to register agents: {str(e)}")
+    
+    def get_agent_manager(self):
+        """Get the agent manager instance"""
+        return self.agent_manager

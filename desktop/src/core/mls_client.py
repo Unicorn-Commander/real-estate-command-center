@@ -104,6 +104,13 @@ class MLSClient:
         
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """Helper to make authenticated API requests"""
+        # Rate limiting
+        time_since_last_request = time.time() - self.last_request_time
+        if time_since_last_request < self.min_request_interval:
+            time.sleep(self.min_request_interval - time_since_last_request)
+        
+        self.last_request_time = time.time()
+
         url = f"{self.base_url}/{endpoint}"
         try:
             response = requests.get(url, headers=self.headers, params=params, timeout=10)

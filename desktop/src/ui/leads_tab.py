@@ -4,7 +4,7 @@ Leads Management Tab with model/view and search.
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
     QPushButton, QDialog, QFormLayout, QComboBox, QDialogButtonBox,
-    QTableView, QLabel
+    QTableView, QLabel, QTextEdit
 )
 from PySide6.QtCore import Qt, QSortFilterProxyModel
 from ui.leads_model import LeadsModel
@@ -18,12 +18,18 @@ class NewLeadDialog(QDialog):
 
         self.name_input = QLineEdit()
         self.email_input = QLineEdit()
+        self.phone_input = QLineEdit()
+        self.source_input = QLineEdit()
         self.status_input = QComboBox()
-        self.status_input.addItems(["New", "Contacted", "Qualified", "Lost"])
+        self.status_input.addItems(["New", "Contacted", "Qualified", "Nurturing", "Converted", "Lost"])
+        self.notes_input = QTextEdit()
 
         layout.addRow("Name:", self.name_input)
         layout.addRow("Email:", self.email_input)
+        layout.addRow("Phone:", self.phone_input)
+        layout.addRow("Source:", self.source_input)
         layout.addRow("Status:", self.status_input)
+        layout.addRow("Notes:", self.notes_input)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -34,7 +40,10 @@ class NewLeadDialog(QDialog):
         return {
             'name': self.name_input.text().strip(),
             'email': self.email_input.text().strip(),
+            'phone': self.phone_input.text().strip(),
+            'source': self.source_input.text().strip(),
             'status': self.status_input.currentText(),
+            'notes': self.notes_input.toPlainText().strip()
         }
 
 class LeadsTab(QWidget):
@@ -89,7 +98,7 @@ class LeadsTab(QWidget):
         if dlg.exec() == QDialog.Accepted:
             data = dlg.get_data()
             if self.colonel_client:
-                self.colonel_client.create_lead(data['name'], data['email'], data['status'])
+                self.colonel_client.create_lead(**data)
             self.load_data()
 
     def open_context_menu(self, pos):
@@ -110,12 +119,13 @@ class LeadsTab(QWidget):
         lead = self.model._leads[row]
         dlg = NewLeadDialog(self)
         dlg.name_input.setText(lead.get('name', ''))
-        dlg.phone_input.setText(lead.get('phone', ''))
         dlg.email_input.setText(lead.get('email', ''))
+        dlg.phone_input.setText(lead.get('phone', ''))
         dlg.source_input.setText(lead.get('source', ''))
         idx = dlg.status_input.findText(lead.get('status', ''))
         if idx >= 0:
             dlg.status_input.setCurrentIndex(idx)
+        dlg.notes_input.setPlainText(lead.get('notes', ''))
         if dlg.exec() == QDialog.Accepted:
             data = dlg.get_data()
             # Update in client

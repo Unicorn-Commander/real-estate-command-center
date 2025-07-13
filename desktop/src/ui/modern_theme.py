@@ -49,7 +49,7 @@ QApplication {{
     font-family: {FONTS['primary']};
     font-size: 13px;
     background-color: {BRAND_COLORS['bg_primary']};
-    color: {BRAND_COLORS['gray_100']};
+    color: {BRAND_COLORS['gray_200']};
 }}
 
 /* Main Window */
@@ -132,7 +132,7 @@ QToolBar QToolButton {{
     border-radius: 8px;
     padding: 8px;
     margin: 2px;
-    color: {BRAND_COLORS['gray_300']};
+    color: {BRAND_COLORS['gray_100']};
     font-weight: 500;
 }}
 
@@ -184,7 +184,7 @@ QTabBar::tab {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 {BRAND_COLORS['bg_tertiary']}, 
         stop:1 {BRAND_COLORS['bg_secondary']});
-    color: {BRAND_COLORS['gray_300']};
+    color: {BRAND_COLORS['gray_100']};
     border: 1px solid {BRAND_COLORS['gray_700']};
     border-bottom: none;
     padding: 12px 20px;

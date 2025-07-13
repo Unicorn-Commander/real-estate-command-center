@@ -8,12 +8,20 @@ from datetime import datetime
 from core.property_scraper import PropertyScraper, PropertyDataEnhancer
 from core.mls_client_enhanced import create_mls_client, MLSAggregator, MLSClient
 from core.public_data_scraper import create_public_scraper, parse_address_components, identify_county_from_address
+from core.api_key_manager import api_key_manager
 
 
 class PropertyService:
     """Service for fetching real property data"""
     
     def __init__(self, preferred_mls_provider: str = 'bridge', use_multiple_providers: bool = True, settings: dict = None):
+        """Initialize PropertyService with enhanced MLS integration
+        
+        Args:
+            preferred_mls_provider: Primary MLS provider to use ('bridge', 'mlsgrid', etc.)
+            use_multiple_providers: Whether to use multiple MLS providers for redundancy
+            settings: Application settings dictionary
+        """
         self.settings = settings or {}
         
         # Multiple data sources for redundancy
@@ -22,23 +30,7 @@ class PropertyService:
         }
         
         # Initialize enhanced MLS integration
-        self.mls_settings = self.settings.get('mls_providers', {})
-        self.preferred_mls_provider = self.mls_settings.get('preferred_provider', preferred_mls_provider)
-        self.use_multiple_providers = self.mls_settings.get('use_multiple_providers', use_multiple_providers)
-        """Initialize PropertyService with enhanced MLS integration
-        
-        Args:
-            preferred_mls_provider: Primary MLS provider to use ('bridge', 'estated', etc.)
-            use_multiple_providers: Whether to use multiple MLS providers for redundancy
-        """
-        # Multiple data sources for redundancy
-        self.data_sources = {
-            'geocoding': 'https://nominatim.openstreetmap.org/search',
-        }
-        
-        # Initialize enhanced MLS integration
-        # Initialize enhanced MLS integration
-        self.mls_settings = self.settings.get('mls_providers', {})
+        self.mls_settings = self.settings.get('integrations', {}).get('mls_providers', {})
         self.preferred_mls_provider = self.mls_settings.get('preferred_provider', preferred_mls_provider)
         self.use_multiple_providers = self.mls_settings.get('use_multiple_providers', use_multiple_providers)
 
@@ -206,6 +198,27 @@ class PropertyService:
                     data_sources_used.append('no_market_data')
                     print("⚠️ No market data available - MLS API key required")
             
+            # Step 7.5: Get property photos if available
+            media = []
+            if property_data and property_data.get('media'):
+                # Media already included from RESO search
+                media = property_data.get('media', [])
+            elif mls_property_id and hasattr(self.primary_mls_client, 'reso_client') and self.primary_mls_client.reso_client:
+                # Try to fetch media using RESO client
+                try:
+                    reso_media = self.primary_mls_client.reso_client.get_media(mls_property_id)
+                    if reso_media:
+                        media = [{
+                            'url': m.get('MediaURL'),
+                            'caption': m.get('ShortDescription', ''),
+                            'type': m.get('MediaCategory', 'Photo'),
+                            'order': m.get('Order', 0)
+                        } for m in reso_media if m.get('MediaURL')]
+                        data_sources_used.append(f"{self.preferred_mls_provider}_media")
+                        print(f"✅ Found {len(media)} photos from {self.preferred_mls_provider}")
+                except Exception as e:
+                    print(f"⚠️ Could not fetch media: {e}")
+            
             # Step 8: Assemble comprehensive result
             result = {
                 'address': address,
@@ -216,6 +229,7 @@ class PropertyService:
                 'market': market_data,
                 'public_records': public_data,
                 'scraped_data': enhanced_data.get('scraped_sources', {}),
+                'media': media,
                 'data_sources_used': list(set(data_sources_used)),  # Remove duplicates
                 'data_confidence': self._calculate_data_confidence(data_sources_used, enhanced_data, public_data),
                 'county': county,
@@ -278,17 +292,19 @@ class PropertyService:
         return min(1.0, max(0.0, final_confidence))
     
     def _geocode_address(self, address: str) -> Optional[Dict[str, Any]]:
-        """Convert address to coordinates and detailed location info"""
+        """Convert address to coordinates and detailed location info using SearXNG."""
         try:
+            # Use general SearXNG for geocoding/location data
+            searxng_url = "http://localhost:8888/search"
             params = {
                 'q': address,
                 'format': 'json',
-                'limit': 1,
-                'addressdetails': 1
+                'category': 'map', # Or 'general' if 'map' category doesn't yield direct geocoding results
+                'safesearch': 0 # Disable safesearch for broader results
             }
             
             response = requests.get(
-                self.data_sources['geocoding'], 
+                searxng_url, 
                 params=params,
                 timeout=10,
                 headers={'User-Agent': 'RealEstateCommandCenter/1.0'}
@@ -296,20 +312,34 @@ class PropertyService:
             
             if response.status_code == 200:
                 data = response.json()
-                if data:
-                    result = data[0]
-                    return {
-                        'lat': float(result['lat']),
-                        'lon': float(result['lon']),
-                        'display_name': result['display_name'],
-                        'address_details': result.get('address', {}),
-                        'importance': result.get('importance', 0.5)
-                    }
+                # SearXNG results structure can vary, so we need to parse it carefully
+                # Look for a result that contains latitude and longitude
+                for result in data.get('results', []):
+                    if 'lat' in result and 'lng' in result:
+                        return {
+                            'lat': float(result['lat']),
+                            'lon': float(result['lng']),
+                            'display_name': result.get('title', address), # Use title as display name
+                            'address_details': {},
+                            'importance': result.get('score', 0.5) # Use score as importance
+                        }
+                    # Fallback for general search results that might contain address info
+                    elif 'url' in result and 'title' in result:
+                        # Attempt to extract address details from title or URL if it's a map link
+                        if "maps.google.com" in result['url'] or "openstreetmap.org" in result['url']:
+                            # This is a heuristic, might need more robust parsing
+                            return {
+                                'lat': 0.0, # Placeholder, actual lat/lon would need parsing from URL or title
+                                'lon': 0.0, # Placeholder
+                                'display_name': result['title'],
+                                'address_details': {},
+                                'importance': result.get('score', 0.5)
+                            }
             
             return None
             
         except Exception as e:
-            print(f"Geocoding error: {e}")
+            print(f"Geocoding error with SearXNG: {e}")
             return None
     
     def search_properties(self, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -455,3 +485,63 @@ class PropertyService:
             
         except Exception as e:
             return {'error': f'Market analysis failed: {str(e)}'}
+    
+    def get_comparable_sales(self, property_id: str, radius_miles: float = 1.0, days_back: int = 180) -> List[Dict[str, Any]]:
+        """Get comparable sales for a property"""
+        try:
+            comparables = []
+            
+            # Try enhanced MLS aggregator first
+            if self.mls_aggregator:
+                # First try to get from all providers
+                for provider, client in self.mls_aggregator.clients.items():
+                    try:
+                        provider_comps = client.get_comparable_sales(property_id, radius_miles, days_back)
+                        if provider_comps:
+                            # Add provider metadata
+                            for comp in provider_comps:
+                                comp['_data_source'] = provider
+                            comparables.extend(provider_comps)
+                            print(f"✅ Found {len(provider_comps)} comparables from {provider}")
+                    except Exception as e:
+                        print(f"⚠️ Failed to get comparables from {provider}: {e}")
+            
+            # Try primary MLS client if no results
+            if not comparables and self.primary_mls_client:
+                primary_comps = self.primary_mls_client.get_comparable_sales(property_id, radius_miles, days_back)
+                if primary_comps:
+                    for comp in primary_comps:
+                        comp['_data_source'] = self.preferred_mls_provider
+                    comparables.extend(primary_comps)
+                    print(f"✅ Found {len(primary_comps)} comparables from {self.preferred_mls_provider}")
+            
+            # Try legacy MLS as last resort
+            if not comparables and self.mls_client:
+                legacy_comps = self.mls_client.get_comparable_sales(property_id)
+                if legacy_comps:
+                    for comp in legacy_comps:
+                        comp['_data_source'] = 'legacy_mls'
+                    comparables.extend(legacy_comps)
+                    print(f"✅ Found {len(legacy_comps)} comparables from legacy MLS")
+            
+            # Standardize the comparable format for UI
+            standardized_comps = []
+            for comp in comparables:
+                standardized = {
+                    'address': comp.get('address', {}).get('unparsed') or comp.get('address') or 'Unknown',
+                    'bedrooms': comp.get('property_details', {}).get('bedrooms') or comp.get('bedrooms'),
+                    'bathrooms': comp.get('property_details', {}).get('bathrooms_full') or comp.get('bathrooms'),
+                    'square_feet': comp.get('property_details', {}).get('square_feet') or comp.get('square_feet'),
+                    'sale_price': comp.get('listing_details', {}).get('close_price') or comp.get('sale_price') or comp.get('close_price'),
+                    'sale_date': comp.get('listing_details', {}).get('close_date') or comp.get('sale_date') or comp.get('close_date'),
+                    'distance_miles': comp.get('distance_miles', 0),
+                    'status': comp.get('status') or 'Sold',
+                    '_data_source': comp.get('_data_source', 'unknown')
+                }
+                standardized_comps.append(standardized)
+            
+            return standardized_comps
+            
+        except Exception as e:
+            print(f"Error getting comparable sales: {e}")
+            return []

@@ -18,3 +18,18 @@ venv/
 # Docker
 **/backend/*.env
 **/backend/*.pem
+
+# Backup files
+*.tar.gz
+*.zip
+*.bak
+
+# Agent state files
+agent_state_*.json
+
+# Virtual environment
+venv/
+
+# Log files
+*.log
+app.log

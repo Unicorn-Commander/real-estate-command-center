@@ -4,7 +4,7 @@ QAbstractTableModel for Campaign data.
 from PySide6.QtCore import QAbstractTableModel, Qt, QModelIndex
 
 class CampaignModel(QAbstractTableModel):
-    HEADERS = ['ID', 'Name', 'Status', 'Start Date']
+    HEADERS = ['ID', 'Name', 'Status', 'Start Date', 'Description', 'Target Audience']
 
     def __init__(self, campaigns=None, parent=None):
         super().__init__(parent)
@@ -29,6 +29,10 @@ class CampaignModel(QAbstractTableModel):
             return camp.get('status')
         elif col == 3:
             return camp.get('start_date')
+        elif col == 4:
+            return camp.get('description')
+        elif col == 5:
+            return camp.get('target_audience')
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):

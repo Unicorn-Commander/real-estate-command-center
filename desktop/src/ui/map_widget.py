@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QUrl, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineSettings
 
 
 class GeocodeThread(QThread):
@@ -72,6 +73,11 @@ class PropertyMapWidget(QWidget):
         self.subject_location = None
         self.comparable_locations = []
         
+        # Create a persistent temporary file for the map
+        self._temp_map_file_obj = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False)
+        self.map_file = self._temp_map_file_obj.name
+        self._temp_map_file_obj.close()
+
         self.init_ui()
         self.setup_signals()
     
@@ -135,6 +141,16 @@ class PropertyMapWidget(QWidget):
         # Web view for displaying the map
         self.web_view = QWebEngineView()
         self.web_view.setMinimumHeight(400)
+        
+        # Configure web view settings to allow external content
+        settings = self.web_view.page().settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+        
+        # Add console message handler for debugging
+        self.web_view.page().javaScriptConsoleMessage = self.handle_console_message
+        
         map_layout.addWidget(self.web_view)
         
         # Map options
@@ -165,8 +181,22 @@ class PropertyMapWidget(QWidget):
         
         self.setLayout(layout)
         
-        # Load initial default map
-        self.create_default_map()
+        # Load initial default map with a delay to ensure widget is ready
+        QTimer.singleShot(100, self.create_default_map)
+    
+    def handle_console_message(self, level, message, line, source):
+        """Handle JavaScript console messages for debugging."""
+        level_names = {0: "Info", 1: "Warning", 2: "Error"}
+        level_name = level_names.get(level, "Unknown")
+        
+        # Log to console for debugging
+        print(f"Map Widget JS {level_name} (line {line}): {message}")
+        
+        # Update status label for critical errors
+        if level == 2 and "L is not defined" in message:
+            self.status_label.setText("Map loading issue detected. Retrying...")
+            # Retry loading after a delay
+            QTimer.singleShot(1000, self.refresh_map)
     
     def setup_signals(self):
         """Connect signals and slots."""
@@ -342,16 +372,48 @@ class PropertyMapWidget(QWidget):
     def save_and_display_map(self, folium_map):
         """Save folium map to HTML and display in web view."""
         try:
-            # Create temporary HTML file
-            if self.map_file:
-                try:
-                    os.unlink(self.map_file)
-                except:
-                    pass
+            # Get the HTML representation
+            html = folium_map.get_root().render()
             
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
-                folium_map.save(f.name)
-                self.map_file = f.name
+            # Add a wrapper to ensure Leaflet loads properly
+            wrapped_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {html.split('<head>')[1].split('</head>')[0]}
+    <script>
+        // Wait for Leaflet to load before executing map code
+        function initializeMap() {{
+            if (typeof L === 'undefined') {{
+                console.log('Leaflet not loaded yet, retrying...');
+                setTimeout(initializeMap, 100);
+                return;
+            }}
+            console.log('Leaflet loaded, initializing map...');
+            {html.split('<script>')[1].split('</script>')[0]}
+        }}
+        
+        // Start initialization when DOM is ready
+        if (document.readyState === 'loading') {{
+            document.addEventListener('DOMContentLoaded', function() {{
+                setTimeout(initializeMap, 100);
+            }});
+        }} else {{
+            setTimeout(initializeMap, 100);
+        }}
+    </script>
+</head>
+<body>
+    {html.split('<body>')[1].split('</body>')[0]}
+</body>
+</html>
+"""
+            
+            # Save the wrapped HTML
+            with open(self.map_file, 'w') as f:
+                f.write(wrapped_html)
             
             # Load in web view
             self.web_view.load(QUrl.fromLocalFile(self.map_file))
@@ -418,8 +480,8 @@ class PropertyMapWidget(QWidget):
         if self.map_file and os.path.exists(self.map_file):
             try:
                 os.unlink(self.map_file)
-            except:
-                pass
+            except Exception as e:
+                print(f"Error cleaning up map file: {e}")
     
     def __del__(self):
         """Destructor to clean up temporary files."""

@@ -216,8 +216,32 @@ class PropertiesTab(QWidget):
             self.delete_property(row)
 
     def edit_property(self, row):
-        # TODO: Implement edit functionality
-        QMessageBox.information(self, "Edit Property", "Edit functionality not yet implemented.")
+        prop = self.proxy.mapToSource(self.table.model().index(row, 0)).data(Qt.UserRole)
+        if not prop:
+            QMessageBox.warning(self, "Edit Property", "Could not retrieve property data for editing.")
+            return
+
+        dlg = NewPropertyDialog(self.colonel_client, self)
+        # Populate dialog with existing data
+        dlg.address_input.setText(prop.get('address', ''))
+        dlg.city_input.setText(prop.get('city', ''))
+        dlg.state_input.setText(prop.get('state', ''))
+        dlg.zip_input.setText(prop.get('zip_code', ''))
+        dlg.property_type_input.setCurrentText(prop.get('property_type', ''))
+        dlg.bedrooms_input.setValue(prop.get('bedrooms', 0))
+        dlg.bathrooms_input.setValue(prop.get('bathrooms', 0.0))
+        dlg.square_feet_input.setValue(prop.get('square_feet', 0))
+        dlg.lot_size_input.setValue(prop.get('lot_size', 0))
+        dlg.year_built_input.setValue(prop.get('year_built', 0))
+        dlg.listing_price_input.setValue(prop.get('listing_price', 0.0))
+        dlg.listing_status_input.setCurrentText(prop.get('listing_status', ''))
+        dlg.mls_id_input.setText(prop.get('mls_id', ''))
+
+        if dlg.exec() == QDialog.Accepted:
+            data = dlg.get_data()
+            if self.colonel_client:
+                self.colonel_client.update_property(prop['id'], data)
+            self.load_data()
 
     def delete_property(self, row):
         from PySide6.QtWidgets import QMessageBox

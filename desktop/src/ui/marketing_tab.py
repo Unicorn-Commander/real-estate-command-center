@@ -3,9 +3,9 @@ Marketing Automation Tab with model/view, search, and context actions.
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QLabel,
-    QTableView, QDialog, QFormLayout, QComboBox, QDialogButtonBox, QMenu, QMessageBox, QGroupBox, QTextEdit
+    QTableView, QDialog, QFormLayout, QComboBox, QDialogButtonBox, QMenu, QMessageBox, QGroupBox, QTextEdit, QDateEdit
 )
-from PySide6.QtCore import Qt, QSortFilterProxyModel, Slot
+from PySide6.QtCore import Qt, QSortFilterProxyModel, Slot, QDate
 from ui.campaign_model import CampaignModel
 
 class NewCampaignDialog(QDialog):
@@ -18,12 +18,17 @@ class NewCampaignDialog(QDialog):
         self.name_input = QLineEdit()
         self.status_input = QComboBox()
         self.status_input.addItems(['Planned', 'Active', 'Completed', 'Paused'])
-        self.date_input = QLineEdit()
-        self.date_input.setPlaceholderText('YYYY-MM-DD')
+        self.start_date_input = QDateEdit()
+        self.start_date_input.setCalendarPopup(True)
+        self.start_date_input.setDate(QDate.currentDate())
+        self.description_input = QTextEdit()
+        self.target_audience_input = QLineEdit()
 
         layout.addRow('Name:', self.name_input)
         layout.addRow('Status:', self.status_input)
-        layout.addRow('Start Date:', self.date_input)
+        layout.addRow('Start Date:', self.start_date_input)
+        layout.addRow('Description:', self.description_input)
+        layout.addRow('Target Audience:', self.target_audience_input)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -34,7 +39,9 @@ class NewCampaignDialog(QDialog):
         return {
             'name': self.name_input.text().strip(),
             'status': self.status_input.currentText(),
-            'start_date': self.date_input.text().strip(),
+            'start_date': self.start_date_input.date().toString(Qt.ISODate),
+            'description': self.description_input.toPlainText().strip(),
+            'target_audience': self.target_audience_input.text().strip(),
         }
 
 class MarketingTab(QWidget):
@@ -199,7 +206,7 @@ class MarketingTab(QWidget):
         if dlg.exec() == QDialog.Accepted:
             data = dlg.get_data()
             if self.colonel_client:
-                self.colonel_client.create_campaign(data['name'], data['status'], data['start_date'])
+                self.colonel_client.create_campaign(**data)
             self.load_data()
 
     def open_context_menu(self, pos):
@@ -223,7 +230,19 @@ class MarketingTab(QWidget):
         idx = dlg.status_input.findText(camp.get('status', ''))
         if idx >= 0:
             dlg.status_input.setCurrentIndex(idx)
-        dlg.date_input.setText(camp.get('start_date', ''))
+        
+        # Set date from string
+        start_date_str = camp.get('start_date', '')
+        if start_date_str:
+            try:
+                date_obj = QDate.fromString(start_date_str, Qt.ISODate)
+                if date_obj.isValid():
+                    dlg.start_date_input.setDate(date_obj)
+            except Exception as e:
+                print(f"Error parsing date: {e}")
+
+        dlg.description_input.setPlainText(camp.get('description', ''))
+        dlg.target_audience_input.setText(camp.get('target_audience', ''))
         if dlg.exec() == QDialog.Accepted:
             data = dlg.get_data()
             if self.colonel_client:

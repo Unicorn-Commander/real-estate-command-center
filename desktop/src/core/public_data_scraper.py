@@ -18,6 +18,9 @@ class PublicPropertyScraper:
     
     def __init__(self):
         self.session = requests.Session()
+        # Use dedicated SearXNG instances for different purposes
+        self.searxng_real_estate_url = "http://localhost:18888/search"  # Real estate specific searches
+        self.searxng_general_url = "http://localhost:8888/search"  # General web searches
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Ubuntu; Linux x86_64) RealEstateCommandCenter/1.0'
         })
@@ -51,6 +54,38 @@ class PublicPropertyScraper:
         }
         
         logger.info("Initialized Public Property Scraper for government records")
+
+    def _search_with_searxng(self, query: str, site_filter: Optional[str] = None, use_real_estate: bool = True) -> Optional[str]:
+        """Perform a search using SearXNG and return the first result URL, optionally filtered by site.
+        
+        Args:
+            query: Search query
+            site_filter: Optional site to filter results (e.g., '.gov')
+            use_real_estate: If True, uses the real estate SearXNG instance for property-specific searches
+        """
+        try:
+            full_query = f"{query}"
+            if site_filter:
+                full_query += f" site:{site_filter}"
+
+            params = {
+                'q': full_query,
+                'format': 'json',
+                'safesearch': 0
+            }
+            # Use real estate instance for property searches, general for government sites
+            search_url = self.searxng_real_estate_url if use_real_estate else self.searxng_general_url
+            response = self.session.get(search_url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            for result in data.get('results', []):
+                if 'url' in result:
+                    return result['url']
+            return None
+        except Exception as e:
+            logger.error(f"SearXNG search error for query '{query}': {e}")
+            return None
     
     def _respect_rate_limit(self):
         """Ensure respectful scraping with rate limiting"""
@@ -59,23 +94,35 @@ class PublicPropertyScraper:
             time.sleep(self.min_request_interval - elapsed)
         self.last_request_time = time.time()
     
-    def _make_request(self, url: str, params: Optional[Dict] = None) -> Optional[BeautifulSoup]:
-        """Make a rate-limited request and return BeautifulSoup object"""
+    def _make_request(self, url: str, params: Optional[Dict] = None, use_searxng_for_url_discovery: bool = False) -> Optional[BeautifulSoup]:
+        """Make a rate-limited request and return BeautifulSoup object.
+        If use_searxng_for_url_discovery is True, it will use SearXNG to find the URL first.
+        """
         self._respect_rate_limit()
         
+        final_url = url
+        if use_searxng_for_url_discovery:
+            logger.info(f"Attempting to discover URL for '{url}' using SearXNG...")
+            discovered_url = self._search_with_searxng(url) # Use the 'url' as the query for SearXNG
+            if discovered_url:
+                final_url = discovered_url
+                logger.info(f"Discovered URL: {final_url}")
+            else:
+                logger.warning(f"Could not discover URL for '{url}' via SearXNG. Proceeding with original URL.")
+
         try:
-            response = self.session.get(url, params=params, timeout=15)
+            response = self.session.get(final_url, params=params, timeout=15)
             response.raise_for_status()
             
             # Check if robots.txt allows this
-            if self._check_robots_txt(url):
+            if self._check_robots_txt(final_url):
                 return BeautifulSoup(response.content, 'html.parser')
             else:
-                logger.warning(f"Robots.txt disallows scraping {url}")
+                logger.warning(f"Robots.txt disallows scraping {final_url}")
                 return None
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed for {url}: {e}")
+            logger.error(f"Request failed for {final_url}: {e}")
             return None
     
     def _check_robots_txt(self, url: str) -> bool:
@@ -128,8 +175,11 @@ class PublicPropertyScraper:
         
         # This is a simplified example - real implementation would need
         # to navigate their specific search forms
-        soup = self._make_request(base_url)
+        # Use SearXNG to find the official King County Assessor property search portal
+        search_query = f"King County WA assessor property search {address}"
+        soup = self._make_request(search_query, use_searxng_for_url_discovery=True)
         if not soup:
+            logger.warning(f"Could not find King County Assessor portal for {address} via SearXNG.")
             return None
         
         # Parse the specific structure of King County's public records
@@ -152,10 +202,11 @@ class PublicPropertyScraper:
     def _scrape_multnomah_county_or(self, address: str) -> Optional[Dict[str, Any]]:
         """Scrape Multnomah County, OR assessor data (Portland area)"""
         # Multnomah County property search
-        base_url = "https://www.portlandmaps.com/bps/mapapp/"
-        
-        soup = self._make_request(base_url)
+        # Use SearXNG to find the official Multnomah County Assessor property search portal
+        search_query = f"Multnomah County OR assessor property search {address}"
+        soup = self._make_request(search_query, use_searxng_for_url_discovery=True)
         if not soup:
+            logger.warning(f"Could not find Multnomah County Assessor portal for {address} via SearXNG.")
             return None
         
         # Template implementation
@@ -176,10 +227,11 @@ class PublicPropertyScraper:
     def _scrape_la_county_ca(self, address: str) -> Optional[Dict[str, Any]]:
         """Scrape Los Angeles County, CA assessor data"""
         # LA County assessor public search
-        base_url = "https://portal.assessor.lacounty.gov/"
-        
-        soup = self._make_request(base_url)
+        # Use SearXNG to find the official Los Angeles County Assessor property search portal
+        search_query = f"Los Angeles County CA assessor property search {address}"
+        soup = self._make_request(search_query, use_searxng_for_url_discovery=True)
         if not soup:
+            logger.warning(f"Could not find Los Angeles County Assessor portal for {address} via SearXNG.")
             return None
         
         # Template implementation
@@ -194,10 +246,11 @@ class PublicPropertyScraper:
     def _scrape_harris_county_tx(self, address: str) -> Optional[Dict[str, Any]]:
         """Scrape Harris County, TX assessor data (Houston area)"""
         # Harris County property search
-        base_url = "https://hcad.org/quick-search/"
-        
-        soup = self._make_request(base_url)
+        # Use SearXNG to find the official Harris County Assessor property search portal
+        search_query = f"Harris County TX assessor property search {address}"
+        soup = self._make_request(search_query, use_searxng_for_url_discovery=True)
         if not soup:
+            logger.warning(f"Could not find Harris County Assessor portal for {address} via SearXNG.")
             return None
         
         # Template implementation

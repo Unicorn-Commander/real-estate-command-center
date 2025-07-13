@@ -4,7 +4,7 @@ QAbstractTableModel for Leads data.
 from PySide6.QtCore import QAbstractTableModel, Qt, QModelIndex
 
 class LeadsModel(QAbstractTableModel):
-    HEADERS = ['ID', 'Name', 'Email', 'Status']
+    HEADERS = ['ID', 'Name', 'Email', 'Phone', 'Source', 'Status', 'Notes']
 
     def __init__(self, leads=None, parent=None):
         super().__init__(parent)
@@ -29,6 +29,12 @@ class LeadsModel(QAbstractTableModel):
             return lead.get('email')
         elif col == 3:
             return lead.get('phone')
+        elif col == 4:
+            return lead.get('source')
+        elif col == 5:
+            return lead.get('status')
+        elif col == 6:
+            return lead.get('notes')
         elif col == 4:
             return lead.get('source')
         elif col == 5:

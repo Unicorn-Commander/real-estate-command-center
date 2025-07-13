@@ -437,24 +437,27 @@ class CMAPDFGenerator:
         # Generate and embed charts
         chart_gen = CMAChartGenerator()
         
-        # Create temporary chart files
-        trend_chart = chart_gen.create_price_trend_chart(
-            cma_data.get('price_trends', []),
-            '/tmp/trend_chart.png'
+        # Create in-memory charts
+        trend_chart_data = chart_gen.create_price_trend_chart(
+            cma_data.get('price_trends', [])
+        )
+        market_chart_data = chart_gen.create_market_analysis_chart(
+            cma_data.get('market_data', {})
         )
         
-        market_chart = chart_gen.create_market_analysis_chart(
-            cma_data.get('market_data', {}),
-            '/tmp/market_chart.png'
-        )
-        
-        # Add charts to PDF
-        if os.path.exists(trend_chart):
-            content.append(Image(trend_chart, width=6*inch, height=3.6*inch))
+        # Add charts to PDF from base64 data
+        if trend_chart_data:
+            trend_img = Image(BytesIO(base64.b64decode(trend_chart_data.split(',')[1])))
+            trend_img.drawHeight = 3.6*inch
+            trend_img.drawWidth = 6*inch
+            content.append(trend_img)
             content.append(Spacer(1, 20))
-        
-        if os.path.exists(market_chart):
-            content.append(Image(market_chart, width=6*inch, height=4.8*inch))
+
+        if market_chart_data:
+            market_img = Image(BytesIO(base64.b64decode(market_chart_data.split(',')[1])))
+            market_img.drawHeight = 4.8*inch
+            market_img.drawWidth = 6*inch
+            content.append(market_img)
             content.append(Spacer(1, 20))
         
         return content

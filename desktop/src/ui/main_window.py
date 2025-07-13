@@ -4,15 +4,15 @@ Professional AI-powered real estate management platform
 """
 import os
 import json
-import datetime
+from datetime import datetime
 import qtawesome as qta
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QToolBar,
     QMenu, QMessageBox, QDialog, QDockWidget, QLabel,
     QHBoxLayout, QWidget, QFrame, QVBoxLayout, QSplitter
 )
-from PySide6.QtGui import QKeySequence, QAction, QFont, QPixmap
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QKeySequence, QAction, QFont, QPixmap, QColor, QBrush
+from PySide6.QtCore import QSize, Qt, QTimer, Slot
 from qt_material import apply_stylesheet
 from ui.leads_tab import LeadsTab
 from ui.marketing_tab import MarketingTab
@@ -27,6 +27,9 @@ from ui.welcome_screen import WelcomeScreen
 from ui.modern_theme import apply_modern_theme, get_brand_color
 from core.settings_manager import settings_manager
 from ui.ai_chat_widget import AIChatWidget
+from ui.docker_status_widget import DockerStatusWidget
+from ui.agents_tab import AgentsTab
+from ui.api_key_dialog import APIKeyDialog
 
 
 class MainWindow(QMainWindow):
@@ -70,6 +73,9 @@ class MainWindow(QMainWindow):
 
         # Initial status and validation
         self._validate_and_update_status()
+        
+        # Connect to agent notifications
+        self._setup_agent_notifications()
     
     def _show_welcome_screen(self):
         """Show the modern welcome screen"""
@@ -113,6 +119,7 @@ class MainWindow(QMainWindow):
         self.database_tab = DatabaseTab(self.colonel_client)
         self.properties_tab = PropertiesTab(self.colonel_client)
         self.tasks_tab = TasksTab(self.colonel_client)
+        self.agents_tab = AgentsTab(self.colonel_client)
         
         # Add tabs with icons
         self.tabs.addTab(self.dashboard_tab, qta.icon('fa5s.tachometer-alt', color='#8B5CF6'), 'Dashboard')
@@ -122,6 +129,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.database_tab, qta.icon('fa5s.database', color='#EF4444'), 'Database')
         self.tabs.addTab(self.properties_tab, qta.icon('fa5s.home', color='#F59E0B'), 'Properties')
         self.tabs.addTab(self.tasks_tab, qta.icon('fa5s.tasks', color='#6B7280'), 'Tasks')
+        self.tabs.addTab(self.agents_tab, qta.icon('fa5s.robot', color='#8B5CF6'), 'AI Agents')
         
         self.content_splitter.addWidget(self.tabs)
         
@@ -283,6 +291,15 @@ class MainWindow(QMainWindow):
         self.data_status_label = QLabel()
         status_layout.addWidget(self.data_status_label)
         
+        # Separator
+        sep3 = QLabel("•")
+        sep3.setStyleSheet(f"color: {get_brand_color('gray_600')};")
+        status_layout.addWidget(sep3)
+        
+        # Docker services status
+        self.docker_status_widget = DockerStatusWidget()
+        status_layout.addWidget(self.docker_status_widget)
+        
         status_layout.addStretch()
         
         # Timestamp
@@ -345,6 +362,13 @@ class MainWindow(QMainWindow):
         self.action_settings.setShortcut(QKeySequence('Ctrl+S'))
         self.action_settings.setToolTip('Open settings (Ctrl+S)')
         self.action_settings.triggered.connect(self.open_settings)
+        
+        # API Keys
+        self.action_api_keys = QAction(
+            qta.icon('fa5s.key'), 'API Keys...', self)
+        self.action_api_keys.setShortcut(QKeySequence('Ctrl+K'))
+        self.action_api_keys.setToolTip('Manage API keys (Ctrl+K)')
+        self.action_api_keys.triggered.connect(self._show_api_keys)
         # AI Assistant Toggle
         self.action_toggle_ai = QAction(
             qta.icon('fa5s.robot'), 'AI Assistant', self)
@@ -526,7 +550,7 @@ class MainWindow(QMainWindow):
         """)
         
         # Update timestamp
-        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+        timestamp = datetime.now().strftime('%H:%M:%S')
         self.timestamp_label.setText(f"Last updated: {timestamp}")
     
     def _validate_and_update_status(self):
@@ -606,3 +630,115 @@ class MainWindow(QMainWindow):
         about_msg.setText(about_text)
         about_msg.setStandardButtons(QMessageBox.Ok)
         about_msg.exec()
+    
+    def _show_api_keys(self):
+        """Show the API key management dialog"""
+        dialog = APIKeyDialog(self)
+        dialog.keys_updated.connect(self._on_api_keys_updated)
+        dialog.exec()
+    
+    def _on_api_keys_updated(self):
+        """Handle API keys being updated"""
+        # Refresh UI elements that depend on API keys
+        self._update_status_bar()
+        # Notify tabs that may need to refresh
+        if hasattr(self.dashboard_tab, 'refresh'):
+            self.dashboard_tab.refresh()
+    
+    def _setup_agent_notifications(self):
+        """Connect to agent manager for notifications"""
+        try:
+            agent_manager = self.colonel_client.get_agent_manager()
+            
+            # Connect to notification signals
+            agent_manager.agent_notification.connect(self._show_agent_notification)
+            agent_manager.agent_error.connect(self._show_agent_error)
+            
+            # Create notification widget
+            self._create_notification_widget()
+            
+        except Exception as e:
+            print(f"Failed to setup agent notifications: {e}")
+    
+    def _create_notification_widget(self):
+        """Create a notification area for agent messages"""
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem, QDockWidget
+        from PySide6.QtCore import QTimer
+        
+        # Create notification dock widget
+        self.notification_dock = QDockWidget("Agent Notifications", self)
+        self.notification_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        
+        # Notification list
+        self.notification_list = QListWidget()
+        self.notification_list.setMaximumHeight(150)
+        self.notification_dock.setWidget(self.notification_list)
+        
+        # Add to main window
+        self.addDockWidget(Qt.RightDockWidgetArea, self.notification_dock)
+        self.notification_dock.hide()  # Hidden by default
+        
+        # Timer to auto-hide notifications
+        self.notification_timer = QTimer()
+        self.notification_timer.timeout.connect(self._hide_old_notifications)
+        self.notification_timer.start(30000)  # Check every 30 seconds
+    
+    @Slot(str, str, str)
+    def _show_agent_notification(self, agent_name: str, notification_type: str, message: str):
+        """Show agent notification in UI"""
+        # Add to notification list
+        timestamp = datetime.now().strftime("%H:%M")
+        item_text = f"[{timestamp}] {agent_name}: {message}"
+        
+        item = QListWidgetItem(item_text)
+        
+        # Color code by type
+        color_map = {
+            "info": QColor(0, 123, 255),      # Blue
+            "success": QColor(40, 167, 69),   # Green
+            "warning": QColor(255, 193, 7),   # Yellow
+            "error": QColor(220, 53, 69)      # Red
+        }
+        
+        if notification_type in color_map:
+            item.setForeground(QBrush(color_map[notification_type]))
+        
+        # Add timestamp as data for cleanup
+        item.setData(Qt.UserRole, datetime.now())
+        
+        self.notification_list.insertItem(0, item)  # Add at top
+        
+        # Show dock if hidden
+        if not self.notification_dock.isVisible():
+            self.notification_dock.show()
+        
+        # Also show in status bar briefly
+        self.statusBar().showMessage(f"{agent_name}: {message}", 5000)
+    
+    @Slot(str, str)
+    def _show_agent_error(self, agent_name: str, error: str):
+        """Show agent error in UI"""
+        self._show_agent_notification(agent_name, "error", error)
+        
+        # Also show error dialog for critical errors
+        if "critical" in error.lower() or "failed" in error.lower():
+            QMessageBox.warning(self, f"Agent Error - {agent_name}", error)
+    
+    def _hide_old_notifications(self):
+        """Remove notifications older than 5 minutes"""
+        current_time = datetime.now()
+        items_to_remove = []
+        
+        for i in range(self.notification_list.count()):
+            item = self.notification_list.item(i)
+            timestamp = item.data(Qt.UserRole)
+            
+            if timestamp and (current_time - timestamp).seconds > 300:  # 5 minutes
+                items_to_remove.append(item)
+        
+        for item in items_to_remove:
+            self.notification_list.takeItem(self.notification_list.row(item))
+        
+        # Hide dock if empty
+        if self.notification_list.count() == 0:
+            self.notification_dock.hide()

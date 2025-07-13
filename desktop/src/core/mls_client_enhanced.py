@@ -1,10 +1,13 @@
 import requests
 import os
 import json
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import logging
 from datetime import datetime
 import time
+from core.api_key_manager import api_key_manager
+from core.bridge_interactive_client import BridgeInteractiveClient
+from core.mlsgrid_client import MLSGridClient
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,9 @@ class MLSClient:
         self.min_request_interval = config.get('rate_limit_seconds', 1)
         
         logger.info(f"Initialized MLS client for provider: {self.provider}")
+        
+        # Initialize RESO client if applicable
+        self.reso_client = self._get_reso_client()
     
     def _get_api_configurations(self) -> Dict[str, Dict[str, Any]]:
         """Get configuration for all supported MLS providers"""
@@ -108,6 +114,23 @@ class MLSClient:
                 'data_key': 'property'
             }
         }
+    
+    def _get_reso_client(self) -> Optional[Union[BridgeInteractiveClient, MLSGridClient]]:
+        """Get RESO Web API client for supported providers"""
+        if not self.api_key:
+            return None
+            
+        try:
+            if self.provider == 'bridge':
+                # Bridge requires server_id - would need to be configured
+                server_id = self.settings.get('mls_providers', {}).get('bridge_server_id')
+                return BridgeInteractiveClient(api_key=self.api_key, server_id=server_id)
+            elif self.provider == 'mlsgrid':
+                return MLSGridClient(api_key=self.api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize RESO client for {self.provider}: {e}")
+            
+        return None
     
     def _respect_rate_limit(self):
         """Ensure we don't exceed API rate limits"""
@@ -209,9 +232,15 @@ class MLSClient:
         """Search for properties based on query parameters"""
         if not self.api_key:
             logger.warning(f"No API key available for {self.provider}, returning empty results")
+            # Check API key with user-friendly error
+            api_key_manager.check_api_key(self.provider.lower().replace(' ', '_'), show_dialog=True)
             return []
             
         logger.info(f"Searching {self.provider} properties with: {query_params}")
+        
+        # Use RESO client if available
+        if self.reso_client and self.provider in ['bridge', 'mlsgrid']:
+            return self._search_with_reso_client(query_params)
         
         # Provider-specific endpoint mapping
         endpoint_map = {
@@ -241,6 +270,39 @@ class MLSClient:
         
         if response and response.get('error'):
             logger.error(f"Search failed for {self.provider}: {response['error']}")
+            
+        return []
+    
+    def _search_with_reso_client(self, query_params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Search using RESO Web API client"""
+        try:
+            if self.provider == 'bridge':
+                # Bridge Interactive search
+                return self.reso_client.get_active_listings(
+                    city=query_params.get('city'),
+                    min_price=query_params.get('min_price'),
+                    max_price=query_params.get('max_price'),
+                    property_type=query_params.get('property_type'),
+                    min_beds=query_params.get('bedrooms'),
+                    min_baths=query_params.get('bathrooms'),
+                    limit=query_params.get('limit', 100)
+                )
+            elif self.provider == 'mlsgrid':
+                # MLSGrid search - requires originating system
+                system = query_params.get('originating_system') or self.settings.get('mls_providers', {}).get('mlsgrid_system', 'mls_pin')
+                return self.reso_client.get_active_listings(
+                    originating_system=system,
+                    city=query_params.get('city'),
+                    state=query_params.get('state'),
+                    min_price=query_params.get('min_price'),
+                    max_price=query_params.get('max_price'),
+                    property_type=query_params.get('property_type'),
+                    min_beds=query_params.get('bedrooms'),
+                    min_baths=query_params.get('bathrooms'),
+                    limit=query_params.get('limit', 100)
+                )
+        except Exception as e:
+            logger.error(f"RESO client search failed: {e}")
             
         return []
 
@@ -276,9 +338,15 @@ class MLSClient:
         """Get comparable sales for a given property"""
         if not self.api_key:
             logger.warning(f"No API key available for {self.provider}, comparables unavailable")
+            # Check API key with user-friendly error
+            api_key_manager.check_api_key(self.provider.lower().replace(' ', '_'), show_dialog=True)
             return []
             
         logger.info(f"Fetching comparable sales from {self.provider} for property ID: {property_id}")
+        
+        # Use RESO client if available
+        if self.reso_client and self.provider in ['bridge', 'mlsgrid']:
+            return self._get_comparables_with_reso_client(property_id, radius_miles, limit)
         
         try:
             # First get the subject property details to find location
@@ -485,7 +553,7 @@ class MLSAggregator:
             if self.settings:
                 mls_settings = self.settings.get('mls_providers', {})
                 # Get API configurations from a dummy MLSClient instance
-                dummy_client = MLSClient()
+                dummy_client = MLSClient(settings=self.settings)
                 for provider_name, config in dummy_client._get_api_configurations().items():
                     api_key_name = config.get('api_key_env', '').lower()
                     if mls_settings.get(api_key_name):
@@ -551,3 +619,41 @@ class MLSAggregator:
                 }
         
         return results
+    
+    def _get_comparables_with_reso_client(self, property_id: str, radius_miles: int, limit: int) -> List[Dict[str, Any]]:
+        """Get comparables using RESO Web API client"""
+        try:
+            # First get the subject property
+            subject = self.reso_client.get_property(property_id, expand=['Media'])
+            if not subject:
+                logger.warning("Could not fetch subject property for comparables")
+                return []
+                
+            # Extract location
+            lat = subject.get('Latitude')
+            lon = subject.get('Longitude')
+            property_type = subject.get('PropertyType')
+            
+            if not (lat and lon):
+                logger.warning("No coordinates available for comparable search")
+                return []
+                
+            # Get comparables
+            if self.provider == 'bridge':
+                return self.reso_client.get_comparable_sales(
+                    latitude=lat,
+                    longitude=lon,
+                    radius_miles=radius_miles,
+                    property_type=property_type,
+                    limit=limit
+                )
+            elif self.provider == 'mlsgrid':
+                # MLSGrid doesn't have direct geo search, need to fetch and filter
+                logger.info("MLSGrid comparable search via standard filters")
+                # Would implement city-based search and filter by distance
+                return []
+                
+        except Exception as e:
+            logger.error(f"RESO client comparables failed: {e}")
+            
+        return []
