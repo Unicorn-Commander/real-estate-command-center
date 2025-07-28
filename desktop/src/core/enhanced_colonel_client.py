@@ -32,6 +32,7 @@ class EnhancedColonelClient:
     def __init__(self, settings: Dict[str, Any] = None):
         self.settings = settings or settings_manager.get_all_settings()
         self.ai_settings = self.settings.get('ai_backend', {})
+        self.logger = logger
         
         # Initialize AI provider manager
         self.ai_manager = AIProviderManager()
@@ -59,13 +60,88 @@ class EnhancedColonelClient:
         # Initialize MLS client for agent use
         self.mls_client = self.property_service.primary_mls_client
         
+        # Initialize Email Service
+        try:
+            from .email_service import EmailService, EmailConfig, EmailProvider
+            
+            # Try to get email settings from settings manager
+            email_settings = self.settings.get('email', {})
+            if email_settings and email_settings.get('from_email'):
+                config = EmailConfig()
+                
+                # Map settings to config
+                provider = email_settings.get('provider', 'smtp')
+                if provider == 'smtp':
+                    config.provider = EmailProvider.SMTP
+                    config.smtp_host = email_settings.get('smtp_host', 'smtp.gmail.com')
+                    config.smtp_port = email_settings.get('smtp_port', 587)
+                    config.smtp_username = email_settings.get('smtp_username', '')
+                    config.smtp_password = email_settings.get('smtp_password', '')
+                    config.smtp_use_tls = email_settings.get('smtp_use_tls', True)
+                elif provider == 'sendgrid':
+                    config.provider = EmailProvider.SENDGRID
+                    config.sendgrid_api_key = email_settings.get('sendgrid_api_key', '')
+                elif provider == 'mailgun':
+                    config.provider = EmailProvider.MAILGUN
+                    config.mailgun_api_key = email_settings.get('mailgun_api_key', '')
+                    config.mailgun_domain = email_settings.get('mailgun_domain', '')
+                
+                config.from_email = email_settings.get('from_email', '')
+                config.from_name = email_settings.get('from_name', 'Real Estate Command Center')
+                config.reply_to = email_settings.get('reply_to', '') or config.from_email
+                
+                self.email_service = EmailService(config)
+                self.logger.info("Email service initialized from settings")
+            else:
+                # Fall back to environment variables
+                self.email_service = EmailService(EmailConfig.from_env())
+                self.logger.info("Email service initialized from environment")
+                
+        except Exception as e:
+            self.logger.warning(f"Email service not available: {e}")
+            self.email_service = None
+        
+        # Initialize SMS Service
+        try:
+            from .sms_service import SMSService, SMSConfig, SMSProvider
+            
+            # Try to get SMS settings from settings manager
+            sms_settings = self.settings.get('sms', {})
+            if sms_settings and sms_settings.get('enable_notifications'):
+                config = SMSConfig()
+                
+                # Map settings to config
+                provider = sms_settings.get('provider', 'twilio')
+                if provider == 'twilio':
+                    config.provider = SMSProvider.TWILIO
+                    config.twilio_account_sid = sms_settings.get('twilio_account_sid', '')
+                    config.twilio_auth_token = sms_settings.get('twilio_auth_token', '')
+                    config.twilio_phone_number = sms_settings.get('twilio_phone_number', '')
+                
+                config.default_country_code = sms_settings.get('default_country_code', '+1')
+                config.enable_notifications = sms_settings.get('enable_notifications', False)
+                config.notification_recipients = sms_settings.get('notification_recipients', [])
+                
+                self.sms_service = SMSService(config)
+                self.logger.info("SMS service initialized from settings")
+            else:
+                # Fall back to environment variables
+                self.sms_service = SMSService(SMSConfig.from_env())
+                self.logger.info("SMS service initialized from environment")
+                
+        except Exception as e:
+            self.logger.warning(f"SMS service not available: {e}")
+            self.sms_service = None
+        
         # Initialize Agent Manager
         self.agent_manager = AgentManager(
             ai_provider_manager=self.ai_manager,
             colonel_client=self,
             property_service=self.property_service,
             mls_client=self.mls_client,
-            database=self.db_engine
+            database=self.db_engine,
+            email_service=self.email_service,
+            sms_service=self.sms_service
         )
         
         # Register all agents

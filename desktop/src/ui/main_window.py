@@ -30,6 +30,18 @@ from ui.ai_chat_widget import AIChatWidget
 from ui.docker_status_widget import DockerStatusWidget
 from ui.agents_tab import AgentsTab
 from ui.api_key_dialog import APIKeyDialog
+from ui.documents_tab import DocumentsTab
+from ui.automation_tab import DocumentAutomationTab
+from ui.calendar_tab import CalendarTab
+from ui.email_integration_tab import EmailIntegrationTab
+from ui.analytics_tab import AnalyticsTab
+from ui.transactions_tab import TransactionsTab
+from ui.document_vault_tab import DocumentVaultTab
+from ui.commission_tab import CommissionTab
+from ui.client_portal_tab import ClientPortalTab
+from ui.user_management_tab import UserManagementTab
+from ui.lead_routing_tab import LeadRoutingTab
+from ui.team_collaboration_tab import TeamCollaborationTab
 
 
 class MainWindow(QMainWindow):
@@ -120,6 +132,18 @@ class MainWindow(QMainWindow):
         self.properties_tab = PropertiesTab(self.colonel_client)
         self.tasks_tab = TasksTab(self.colonel_client)
         self.agents_tab = AgentsTab(self.colonel_client)
+        self.documents_tab = DocumentsTab()
+        self.automation_tab = DocumentAutomationTab()
+        self.calendar_tab = CalendarTab()
+        self.email_tab = EmailIntegrationTab()
+        self.analytics_tab = AnalyticsTab(self.colonel_client)
+        self.transactions_tab = TransactionsTab(self.colonel_client)
+        self.document_vault_tab = DocumentVaultTab()
+        self.commission_tab = CommissionTab()
+        self.client_portal_tab = ClientPortalTab()
+        self.user_management_tab = UserManagementTab()
+        self.lead_routing_tab = LeadRoutingTab()
+        self.team_collaboration_tab = TeamCollaborationTab()
         
         # Add tabs with icons
         self.tabs.addTab(self.dashboard_tab, qta.icon('fa5s.tachometer-alt', color='#8B5CF6'), 'Dashboard')
@@ -130,6 +154,18 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.properties_tab, qta.icon('fa5s.home', color='#F59E0B'), 'Properties')
         self.tabs.addTab(self.tasks_tab, qta.icon('fa5s.tasks', color='#6B7280'), 'Tasks')
         self.tabs.addTab(self.agents_tab, qta.icon('fa5s.robot', color='#8B5CF6'), 'AI Agents')
+        self.tabs.addTab(self.documents_tab, qta.icon('fa5s.file-alt', color='#14B8A6'), 'Documents')
+        self.tabs.addTab(self.automation_tab, qta.icon('fa5s.magic', color='#A855F7'), 'Automation')
+        self.tabs.addTab(self.calendar_tab, qta.icon('fa5s.calendar-alt', color='#10B981'), 'Calendar')
+        self.tabs.addTab(self.email_tab, qta.icon('fa5s.envelope', color='#3B82F6'), 'Email')
+        self.tabs.addTab(self.analytics_tab, qta.icon('fa5s.chart-pie', color='#EC4899'), 'Analytics')
+        self.tabs.addTab(self.transactions_tab, qta.icon('fa5s.handshake', color='#F97316'), 'Transactions')
+        self.tabs.addTab(self.document_vault_tab, qta.icon('fa5s.lock', color='#8B5CF6'), 'Document Vault')
+        self.tabs.addTab(self.commission_tab, qta.icon('fa5s.percentage', color='#059669'), 'Commissions')
+        self.tabs.addTab(self.client_portal_tab, qta.icon('fa5s.user-circle', color='#3B82F6'), 'Client Portal')
+        self.tabs.addTab(self.user_management_tab, qta.icon('fa5s.users-cog', color='#DC2626'), 'User Management')
+        self.tabs.addTab(self.lead_routing_tab, qta.icon('fa5s.route', color='#10B981'), 'Lead Routing')
+        self.tabs.addTab(self.team_collaboration_tab, qta.icon('fa5s.users-cog', color='#7C3AED'), 'Team Collaboration')
         
         self.content_splitter.addWidget(self.tabs)
         
